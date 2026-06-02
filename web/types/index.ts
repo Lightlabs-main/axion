@@ -186,7 +186,7 @@ export type PermissionLevel =
   | "Execute low-value actions"
   | "Higher autonomous limit";
 
-export interface AxionDemoState {
+export interface AxionState {
   agent: AgentIdentity | null;
   policy: Policy;
   strategy: StrategyState;

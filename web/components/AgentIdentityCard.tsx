@@ -28,7 +28,7 @@ export function AgentIdentityCard({ agent }: { agent: AgentIdentity }) {
             <div className="mt-1 flex items-center gap-2 text-xs text-[var(--muted)]">
               <span className="mono">{agent.agentId}</span>
               <Badge tone={agent.mode === "onchain" ? "emerald" : "violet"}>
-                {agent.mode === "onchain" ? "On-chain" : "Local demo"}
+                {agent.mode === "onchain" ? "On-chain · Mantle" : "Pending"}
               </Badge>
             </div>
           </div>

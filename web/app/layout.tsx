@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
+import { WalletProvider } from "@/components/WalletProvider";
 
 export const metadata: Metadata = {
   title: "Axion — The wallet that proves how it thinks",
@@ -25,13 +26,15 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <div className="relative z-10 flex min-h-screen flex-col">
-          <Navbar />
-          <main className="mx-auto w-full max-w-6xl flex-1 px-5 pb-24 pt-8 sm:px-8">
-            {children}
-          </main>
-          <Footer />
-        </div>
+        <WalletProvider>
+          <div className="relative z-10 flex min-h-screen flex-col">
+            <Navbar />
+            <main className="mx-auto w-full max-w-6xl flex-1 px-5 pb-24 pt-8 sm:px-8">
+              {children}
+            </main>
+            <Footer />
+          </div>
+        </WalletProvider>
       </body>
     </html>
   );

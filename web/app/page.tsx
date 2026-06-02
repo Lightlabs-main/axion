@@ -30,7 +30,7 @@ export default function HomePage() {
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link href="/console" className="btn btn-primary px-6 py-3 text-base">
-              Launch Demo →
+              Launch App →
             </Link>
             <Link href="/about" className="btn btn-ghost px-6 py-3 text-base">
               How it works

@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Address } from "viem";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentIdentity,
-  AxionDemoState,
+  AxionState,
   Commitment,
   DecisionTree,
   ExecutionResult,
@@ -27,24 +26,15 @@ import { LocalByrealAdapter, executeBranch } from "@/lib/byrealAdapter";
 import { judgeAndForge, type JudgeForgeResult } from "@/lib/agentEngine";
 import {
   commitDecisionTreeOnchain,
-  connectWallet,
   evolveIdentityOnchain,
   faucetUsdc,
-  getChainId,
-  getUsdcBalance,
-  hasInjectedWallet,
   registerAgentOnchain,
   writeEpochOnchain,
 } from "@/lib/contractClient";
-import {
-  ACTIVE_CHAIN,
-  CHAIN_ID,
-  addressExplorerLink,
-  isOnchainConfigured,
-  txExplorerLink,
-} from "@/lib/config";
+import { ACTIVE_CHAIN, addressExplorerLink, txExplorerLink } from "@/lib/config";
 import { ZERO_ROOT } from "@/lib/hashing";
 import { START_TRUST_SCORE } from "@/lib/trustScore";
+import { useWallet } from "@/components/WalletProvider";
 import { LifecycleStepper } from "@/components/LifecycleStepper";
 import { DecisionTreeView } from "@/components/DecisionTree";
 import { PolicyCard } from "@/components/PolicyCard";
@@ -52,23 +42,21 @@ import { ExecutionView } from "@/components/ExecutionView";
 import { EpochView } from "@/components/EpochView";
 import { SectionTitle, Badge } from "@/components/ui";
 
-const DEMO_GOAL =
+const DEFAULT_GOAL =
   "Use 100 test USDC to find a low-risk yield opportunity on Mantle. Avoid unsafe approvals and high slippage.";
 
 const adapter = new LocalByrealAdapter();
 
 export default function ConsolePage() {
+  const { account, usdc, configured, hasWallet, wrongChain, connect, connecting, refresh } =
+    useWallet();
+
   const [mounted, setMounted] = useState(false);
-  const [state, setState] = useState<AxionDemoState | null>(null);
-  const [goal, setGoal] = useState(DEMO_GOAL);
+  const [state, setState] = useState<AxionState | null>(null);
+  const [goal, setGoal] = useState(DEFAULT_GOAL);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-
-  // Wallet / chain state.
-  const [account, setAccount] = useState<Address | null>(null);
-  const [chainId, setChainId] = useState<number | null>(null);
-  const [usdc, setUsdc] = useState<number>(0);
 
   // Ephemeral lifecycle working state (current run).
   const [tree, setTree] = useState<DecisionTree | null>(null);
@@ -79,25 +67,12 @@ export default function ConsolePage() {
 
   const resultRef = useRef<HTMLDivElement | null>(null);
 
-  const configured = isOnchainConfigured();
-  const hasWallet = hasInjectedWallet();
-
   useEffect(() => {
     setState(loadState());
     setMounted(true);
   }, []);
 
-  const refreshWallet = useCallback(async (acc: Address) => {
-    try {
-      const [cid, bal] = await Promise.all([getChainId(), getUsdcBalance(acc)]);
-      setChainId(cid);
-      setUsdc(bal);
-    } catch {
-      /* non-fatal */
-    }
-  }, []);
-
-  function persist(next: AxionDemoState) {
+  function persist(next: AxionState) {
     setState(next);
     saveState(next);
   }
@@ -122,23 +97,6 @@ export default function ConsolePage() {
 
   const agent = state.agent;
   const selectedBranch = tree?.branches.find((b) => b.id === tree.selectedBranchId);
-  const wrongChain = account !== null && chainId !== null && chainId !== CHAIN_ID;
-
-  async function handleConnect() {
-    setError(null);
-    setBusy("connect");
-    try {
-      const acc = await connectWallet();
-      if (!acc) throw new Error("No account returned from wallet.");
-      setAccount(acc);
-      await refreshWallet(acc);
-      setNotice("Wallet connected.");
-    } catch (e) {
-      setError(humanError(e));
-    } finally {
-      setBusy(null);
-    }
-  }
 
   async function handleFaucet() {
     if (!account) return;
@@ -146,7 +104,7 @@ export default function ConsolePage() {
     setBusy("faucet");
     try {
       await faucetUsdc(account, 1000);
-      await refreshWallet(account);
+      await refresh();
       setNotice("Minted 1,000 test aUSDC to your wallet.");
     } catch (e) {
       setError(humanError(e));
@@ -193,7 +151,7 @@ export default function ConsolePage() {
     setError(null);
     setNotice(null);
     if (!agent) return;
-    const g = goal.trim() || DEMO_GOAL;
+    const g = goal.trim() || DEFAULT_GOAL;
     const t = generateDecisionTree(g, state!.policy, state!.strategy, agent.strategyVersion);
     setTree(t);
     setCommitment(null);
@@ -248,7 +206,7 @@ export default function ConsolePage() {
     try {
       const result = await executeBranch(adapter, selectedBranch, state!.policy, account);
       setExecution(result);
-      await refreshWallet(account);
+      await refresh();
       scrollToResult();
     } catch (e) {
       setError(humanError(e));
@@ -430,11 +388,11 @@ export default function ConsolePage() {
             transactions. You can mint free test aUSDC once connected.
           </p>
           <button
-            onClick={handleConnect}
-            disabled={busy === "connect"}
+            onClick={connect}
+            disabled={connecting}
             className="btn btn-primary mx-auto mt-5 px-6 py-3"
           >
-            {busy === "connect" ? "Connecting…" : "Connect wallet"}
+            {connecting ? "Connecting…" : "Connect wallet"}
           </button>
         </div>
       ) : !agent ? (

@@ -69,6 +69,17 @@ export function fromUnits(units: bigint): number {
   return Number(units) / 10 ** USDC_DECIMALS;
 }
 
+/** Return the already-authorised account without prompting, or null. */
+export async function getConnectedAccount(): Promise<Address | null> {
+  if (!hasInjectedWallet()) return null;
+  try {
+    const accounts = (await window.ethereum!.request({ method: "eth_accounts" })) as string[];
+    return (accounts?.[0] as Address) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Connect the wallet and make sure it is on the configured Mantle network. */
 export async function connectWallet(): Promise<Address | null> {
   if (!hasInjectedWallet()) return null;

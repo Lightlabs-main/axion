@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AxionMark } from "./AxionMark";
+import { ConnectButton } from "./ConnectButton";
 
 const LINKS = [
   { href: "/", label: "Home" },
@@ -44,9 +45,9 @@ export function Navbar() {
               </Link>
             );
           })}
-          <Link href="/console" className="btn btn-primary ml-2 hidden sm:inline-flex">
-            Launch Demo
-          </Link>
+          <div className="ml-2 hidden sm:inline-flex">
+            <ConnectButton />
+          </div>
         </div>
       </nav>
     </header>

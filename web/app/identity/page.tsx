@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { AxionDemoState } from "@/types";
+import type { AxionState } from "@/types";
 import { loadState } from "@/lib/storage";
 import { AgentIdentityCard } from "@/components/AgentIdentityCard";
 import { Timeline } from "@/components/EpochCard";
@@ -10,7 +10,7 @@ import { SectionTitle } from "@/components/ui";
 
 export default function IdentityPage() {
   const [mounted, setMounted] = useState(false);
-  const [state, setState] = useState<AxionDemoState | null>(null);
+  const [state, setState] = useState<AxionState | null>(null);
 
   useEffect(() => {
     setState(loadState());

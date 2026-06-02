@@ -25,7 +25,7 @@ interface Body {
  *
  * - If OPENAI_API_KEY is set, ask the model for a short, structured post-mortem.
  * - If it is missing, or anything fails, return { postMortem: null } so the
- *   client falls back to the deterministic post-mortem. The demo never breaks
+ *   client falls back to the deterministic post-mortem. Nothing breaks
  *   on a missing key.
  */
 export async function POST(req: Request) {
