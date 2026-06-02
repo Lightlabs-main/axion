@@ -13,13 +13,14 @@ export type ApprovalRisk = "none" | "safe" | "unsafe";
 export interface Route {
   id: string;
   name: string;
-  expectedYieldPct: number;
+  expectedYieldPct: number; // advertised / pre-execution estimate
   liquidity: "full" | "high" | "medium" | "low";
-  slippageBps: number; // basis points
+  slippageBps: number; // advertised estimate in basis points
   approvalRisk: ApprovalRisk;
   protocolTrust: "n/a" | "low" | "medium" | "high";
   risk: RiskLevel;
-  isDemoRoute: true; // we are always honest: these are simulated routes
+  /** Which deployed vault this route executes into (undefined = no on-chain action, e.g. Hold). */
+  vaultKey?: "balanced" | "highApy";
 }
 
 export interface Policy {
@@ -94,13 +95,16 @@ export interface ExecutionResult {
   branchId: Branch["id"];
   routeId?: string;
   skillTrace: SkillTraceEntry[];
-  actualYieldPct: number;
-  actualSlippageBps: number;
+  actualYieldPct: number; // realised APY read from the vault on-chain
+  actualSlippageBps: number; // realised entry fee read from the vault on-chain
   succeeded: boolean;
   blockedReason?: string;
   actionHash: string;
   outcomeHash: string;
-  txHash?: string;
+  txHash?: string; // deposit transaction hash
+  vaultAddress?: string;
+  creditedUsdc?: number; // net principal credited after the on-chain fee
+  feePaidUsdc?: number; // realised fee paid on-chain
   mode: "local" | "onchain";
 }
 

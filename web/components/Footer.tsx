@@ -9,7 +9,7 @@ export function Footer() {
           <span>Axion · self-forging agentic wallet · Mantle Turing Test Hackathon 2026</span>
         </div>
         <p className="text-xs text-[var(--muted)]">
-          Demo routes are simulated and labelled. The lifecycle is real.
+          aUSDC + vaults are Axion-deployed test contracts. The on-chain lifecycle is real.
         </p>
       </div>
     </footer>

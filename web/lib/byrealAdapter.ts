@@ -5,158 +5,212 @@ import type {
   Route,
   SkillTraceEntry,
 } from "@/types";
-import { getRoute } from "./mockRoutes";
+import { getRoute, vaultAddressFor } from "./mockRoutes";
 import { hashAction, hashOutcome } from "./hashing";
+import {
+  depositToVault,
+  vaultPosition,
+  vaultQuote,
+  type VaultQuote,
+} from "./contractClient";
+import type { Address } from "viem";
 
 /**
  * ByrealSkillAdapter is the swappable interface to a skill-execution backend.
- * The demo ships a LocalByrealAdapter (deterministic, fully offline). To plug
- * in a real Byreal Skills CLI later, implement this same interface and swap the
- * instance in agentEngine — nothing else needs to change.
+ * The shipped adapter runs Axion's safety skills against REAL on-chain vault
+ * data (read via `quote()`/`positionOf()`). To plug in the real Byreal Skills
+ * CLI later, implement this same interface and swap the instance — the rest of
+ * the lifecycle is unchanged.
  *
- * NOTE: We intentionally do NOT import a non-existent Byreal SDK package. The
+ * NOTE: we intentionally do NOT import a non-existent Byreal SDK package; the
  * adapter boundary keeps the integration honest and replaceable.
  */
 export interface ByrealSkillAdapter {
   readonly name: string;
   readonly isReal: boolean;
-  runRiskCheck(route: Route, policy: Policy): SkillTraceEntry;
-  runRouteCompare(route: Route): SkillTraceEntry;
-  runApprovalGuard(route: Route, policy: Policy): SkillTraceEntry;
-  runExecution(branch: Branch, route: Route | undefined, policy: Policy): SkillTraceEntry;
-  runOutcomeVerifier(branch: Branch, actual: { yieldPct: number; slippageBps: number }): SkillTraceEntry;
+  runRouteCompare(route: Route, realised: VaultQuote): SkillTraceEntry;
+  runRiskCheck(realised: VaultQuote, policy: Policy): SkillTraceEntry;
+  runApprovalGuard(realised: VaultQuote, policy: Policy): SkillTraceEntry;
+  runExecution(branch: Branch, route: Route | undefined, deposit?: { txHash: string; credited: number }): SkillTraceEntry;
+  runOutcomeVerifier(realised: VaultQuote, accruedNote: string): SkillTraceEntry;
 }
 
-/**
- * Deterministic local adapter labelled clearly as a demo backend.
- */
+/** Adapter that formats Axion's skills around live on-chain vault reads. */
 export class LocalByrealAdapter implements ByrealSkillAdapter {
-  readonly name = "Byreal-compatible Local Adapter (demo)";
-  readonly isReal = false;
+  readonly name = "Byreal-compatible Adapter (on-chain reads)";
+  readonly isReal = true;
 
-  runRiskCheck(route: Route, policy: Policy): SkillTraceEntry {
-    const overSlippage = route.slippageBps > policy.maxSlippageBps;
-    const passed = !overSlippage;
-    return {
-      skill: "RiskCheckSkill",
-      input: `${route.name} slippage=${(route.slippageBps / 100).toFixed(2)}% liquidity=${route.liquidity}`,
-      output: overSlippage
-        ? `FAIL: slippage above policy max ${(policy.maxSlippageBps / 100).toFixed(2)}%`
-        : `OK: slippage within policy; risk=${route.risk}`,
-      passed,
-    };
-  }
-
-  runRouteCompare(route: Route): SkillTraceEntry {
+  runRouteCompare(route: Route, realised: VaultQuote): SkillTraceEntry {
     return {
       skill: "RouteCompareSkill",
-      input: `Candidate route ${route.name}`,
-      output: `APY ${route.expectedYieldPct}% · liquidity ${route.liquidity} · protocolTrust ${route.protocolTrust}`,
+      input: `Candidate ${route.name} (advertised ${route.expectedYieldPct}% / ${(route.slippageBps / 100).toFixed(2)}%)`,
+      output: `On-chain quote: APY ${(realised.apyBps / 100).toFixed(2)}% · entry fee ${(realised.depositFeeBps / 100).toFixed(2)}% · tag ${realised.riskTag}`,
       passed: true,
     };
   }
 
-  runApprovalGuard(route: Route, policy: Policy): SkillTraceEntry {
-    const unsafe = route.approvalRisk === "unsafe" && !policy.allowUnsafeApprovals;
+  runRiskCheck(realised: VaultQuote, policy: Policy): SkillTraceEntry {
+    const over = realised.depositFeeBps > policy.maxSlippageBps;
+    return {
+      skill: "RiskCheckSkill",
+      input: `realisedFee=${(realised.depositFeeBps / 100).toFixed(2)}% policyMax=${(policy.maxSlippageBps / 100).toFixed(2)}%`,
+      output: over
+        ? `FAIL: on-chain entry fee exceeds policy max`
+        : `OK: on-chain entry fee within policy`,
+      passed: !over,
+    };
+  }
+
+  runApprovalGuard(realised: VaultQuote, policy: Policy): SkillTraceEntry {
+    const unsafe = realised.riskTag === "unsafe" && !policy.allowUnsafeApprovals;
     return {
       skill: "ApprovalGuardSkill",
-      input: `approvalRisk=${route.approvalRisk} allowUnsafe=${policy.allowUnsafeApprovals}`,
+      input: `vaultTag=${realised.riskTag} allowUnsafe=${policy.allowUnsafeApprovals}`,
       output: unsafe
-        ? "BLOCK: unsafe approval not permitted by policy"
+        ? "BLOCK: vault flagged unsafe and policy forbids unsafe approvals"
         : "OK: approval pattern permitted",
       passed: !unsafe,
     };
   }
 
-  runExecution(branch: Branch, route: Route | undefined, _policy: Policy): SkillTraceEntry {
-    if (!route || branch.id === "D") {
+  runExecution(
+    branch: Branch,
+    route: Route | undefined,
+    deposit?: { txHash: string; credited: number }
+  ): SkillTraceEntry {
+    if (branch.id === "D") {
       return {
         skill: "ExecutionSkill",
         input: branch.action,
-        output:
-          branch.id === "D"
-            ? "No execution — branch D refuses to act"
-            : "No execution — hold position",
+        output: "No execution — branch D refuses to act",
+        passed: true,
+      };
+    }
+    if (!route?.vaultKey) {
+      return {
+        skill: "ExecutionSkill",
+        input: branch.action,
+        output: "No on-chain action — holding position",
+        passed: true,
+      };
+    }
+    if (deposit) {
+      return {
+        skill: "ExecutionSkill",
+        input: `Deposit into ${route.name} vault`,
+        output: `On-chain deposit ${deposit.txHash.slice(0, 10)}… · credited ${deposit.credited.toFixed(4)} aUSDC`,
         passed: true,
       };
     }
     return {
       skill: "ExecutionSkill",
-      input: `Execute ${branch.name} via ${route.name} (demo route)`,
-      output: `Simulated deposit submitted to ${route.name}`,
-      passed: true,
+      input: branch.action,
+      output: "Execution gated by safety checks — no deposit made",
+      passed: false,
     };
   }
 
-  runOutcomeVerifier(
-    branch: Branch,
-    actual: { yieldPct: number; slippageBps: number }
-  ): SkillTraceEntry {
+  runOutcomeVerifier(realised: VaultQuote, accruedNote: string): SkillTraceEntry {
     return {
       skill: "OutcomeVerifierSkill",
-      input: `branch=${branch.id}`,
-      output: `Observed yield ${actual.yieldPct}% · slippage ${(actual.slippageBps / 100).toFixed(2)}%`,
+      input: "read positionOf() + quote() on-chain",
+      output: `Realised APY ${(realised.apyBps / 100).toFixed(2)}% · ${accruedNote}`,
       passed: true,
     };
   }
 }
 
 /**
- * Execute a selected branch through the adapter and produce a deterministic
- * outcome. Slippage/yield are derived from the route with a small, deterministic
- * "market drift" so the verification step has something meaningful to judge.
+ * Execute a selected branch for REAL: read the target vault's on-chain terms,
+ * run the safety gate, and (if it passes) deposit real test USDC into the vault.
+ * The realised yield/slippage are read from chain, so the verification step
+ * judges the prediction against ground truth — not a simulation.
  */
-export function executeBranch(
+export async function executeBranch(
   adapter: ByrealSkillAdapter,
   branch: Branch,
-  policy: Policy
-): ExecutionResult {
+  policy: Policy,
+  account: Address
+): Promise<ExecutionResult> {
   const route = branch.routeId ? getRoute(branch.routeId) : undefined;
+  const vaultAddr = vaultAddressFor(route) as Address | undefined;
   const trace: SkillTraceEntry[] = [];
 
-  if (route) {
-    trace.push(adapter.runRouteCompare(route));
-    trace.push(adapter.runRiskCheck(route, policy));
-    trace.push(adapter.runApprovalGuard(route, policy));
+  // Branch D / Hold: no on-chain action.
+  if (branch.id === "D" || !route?.vaultKey || !vaultAddr) {
+    trace.push(adapter.runExecution(branch, route));
+    const actionHash = hashAction({ branchId: branch.id, routeId: branch.routeId, spend: 0 });
+    const outcomeHash = hashOutcome({
+      actualYieldPct: 0,
+      actualSlippageBps: 0,
+      succeeded: true,
+      blockedReason: branch.id === "D" ? "Execution rejected by policy/safety checks" : undefined,
+    });
+    return {
+      branchId: branch.id,
+      routeId: branch.routeId,
+      skillTrace: trace,
+      actualYieldPct: 0,
+      actualSlippageBps: 0,
+      succeeded: true,
+      blockedReason: branch.id === "D" ? "Execution rejected by policy/safety checks" : undefined,
+      actionHash,
+      outcomeHash,
+      mode: "onchain",
+    };
   }
 
-  // Hard safety gate before execution.
+  // Read REAL on-chain terms for the target vault.
+  const realised = await vaultQuote(vaultAddr);
+  trace.push(adapter.runRouteCompare(route, realised));
+  trace.push(adapter.runRiskCheck(realised, policy));
+  trace.push(adapter.runApprovalGuard(realised, policy));
+
   const blocked =
-    !!route &&
-    ((route.approvalRisk === "unsafe" && !policy.allowUnsafeApprovals) ||
-      route.slippageBps > policy.maxSlippageBps);
+    (realised.riskTag === "unsafe" && !policy.allowUnsafeApprovals) ||
+    realised.depositFeeBps > policy.maxSlippageBps;
 
-  const exec = adapter.runExecution(branch, route, policy);
-  trace.push(exec);
+  const actualYieldPct = Number((realised.apyBps / 100).toFixed(2));
+  const actualSlippageBps = realised.depositFeeBps;
 
-  let actualYieldPct = 0;
-  let actualSlippageBps = 0;
-  let succeeded = true;
-  let blockedReason: string | undefined;
-
-  if (branch.id === "D") {
-    succeeded = true; // refusing to act is a success of the safety system
-    blockedReason = "Execution rejected by policy/safety checks";
-  } else if (blocked) {
-    succeeded = false;
-    blockedReason =
-      route && route.approvalRisk === "unsafe"
-        ? "Unsafe approval blocked"
-        : "Slippage above policy threshold";
-  } else if (route) {
-    // Deterministic drift: real markets rarely match the brochure exactly.
-    // Balanced route slightly underperforms; high-APY route slips more.
-    const yieldDrift = route.id === "route-a" ? -2 : route.id === "route-b" ? -0.4 : 0;
-    const slippageDrift = route.id === "route-a" ? 40 : route.id === "route-b" ? 8 : 0;
-    actualYieldPct = Math.max(0, Number((route.expectedYieldPct + yieldDrift).toFixed(2)));
-    actualSlippageBps = route.slippageBps + slippageDrift;
+  if (blocked) {
+    trace.push(adapter.runExecution(branch, route)); // no deposit
+    const blockedReason =
+      realised.riskTag === "unsafe" && !policy.allowUnsafeApprovals
+        ? "Unsafe approval blocked by policy"
+        : "On-chain entry fee above policy slippage threshold";
+    const actionHash = hashAction({ branchId: branch.id, routeId: branch.routeId, spend: 0 });
+    const outcomeHash = hashOutcome({
+      actualYieldPct,
+      actualSlippageBps,
+      succeeded: false,
+      blockedReason,
+    });
+    return {
+      branchId: branch.id,
+      routeId: branch.routeId,
+      skillTrace: trace,
+      actualYieldPct,
+      actualSlippageBps,
+      succeeded: false,
+      blockedReason,
+      vaultAddress: vaultAddr,
+      actionHash,
+      outcomeHash,
+      mode: "onchain",
+    };
   }
 
+  // Safety passed — perform the REAL deposit.
+  const deposit = await depositToVault(account, vaultAddr, policy.maxSpend);
+  trace.push(adapter.runExecution(branch, route, deposit));
+
+  const pos = await vaultPosition(vaultAddr, account);
   trace.push(
-    adapter.runOutcomeVerifier(branch, {
-      yieldPct: actualYieldPct,
-      slippageBps: actualSlippageBps,
-    })
+    adapter.runOutcomeVerifier(
+      realised,
+      `principal ${pos.principal.toFixed(4)} aUSDC, accrued ${pos.accrued.toFixed(6)} aUSDC`
+    )
   );
 
   const actionHash = hashAction({
@@ -167,8 +221,7 @@ export function executeBranch(
   const outcomeHash = hashOutcome({
     actualYieldPct,
     actualSlippageBps,
-    succeeded,
-    blockedReason,
+    succeeded: true,
   });
 
   return {
@@ -177,10 +230,13 @@ export function executeBranch(
     skillTrace: trace,
     actualYieldPct,
     actualSlippageBps,
-    succeeded,
-    blockedReason,
+    succeeded: true,
+    vaultAddress: vaultAddr,
+    creditedUsdc: deposit.credited,
+    feePaidUsdc: deposit.feePaid,
+    txHash: deposit.txHash,
     actionHash,
     outcomeHash,
-    mode: "local",
+    mode: "onchain",
   };
 }

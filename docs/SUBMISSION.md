@@ -24,7 +24,7 @@ Agentic Wallets & Economy.
 
 ## Demo
 
-The user gives Axion a low-risk yield goal. Axion generates multiple branches, rejects unsafe high-APY routes, commits its decision tree on Mantle, executes the safest route through a Byreal-style skill adapter, verifies the outcome, writes a judged epoch, and updates its strategy version and trust score.
+The user connects a wallet, mints test aUSDC from the faucet, and gives Axion a low-risk yield goal. Axion generates multiple branches, rejects the unsafe high-APY route, and commits its decision tree on Mantle. It then **deposits real test USDC into a deployed AxionYieldVault** through a Byreal-style skill adapter, reads the realised APY and entry fee back from chain, verifies the outcome against its committed prediction, writes a judged epoch on-chain, and updates its strategy version, memory root and trust score — all as real Mantle transactions with explorer links.
 
 ## What makes it different
 
@@ -32,4 +32,4 @@ Axion is not a dashboard, a trading bot, a yield recommender, or a chatbot. It i
 
 ## Tech
 
-Next.js 14 (App Router) + TypeScript + Tailwind; Solidity 0.8.24 contracts on Mantle (AxionAgentRegistry, DecisionCommitmentLog, EpochMemoryLog, AxionPolicyVault); viem for chain access; deterministic agent engine with an optional LLM enrichment that safely falls back when no key is present. Runs fully in local demo mode with no wallet or API key, and on Mantle once contracts are configured.
+Next.js 14 (App Router) + TypeScript + Tailwind; Solidity 0.8.24 contracts on Mantle — AxionAgentRegistry, DecisionCommitmentLog, EpochMemoryLog, AxionPolicyVault, plus a real ERC-20 test USDC (MockUSDC) and AxionYieldVault for the on-chain execution layer; viem for chain access (real wallet connect, network switching, event-log id capture); deterministic agent engine with optional LLM-enriched post-mortems that safely fall back when no key is present. The full lifecycle runs as real Mantle transactions; a `lifecycle-e2e` script proves it end-to-end on-chain. The aUSDC token and vaults are test contracts deployed by Axion, clearly labelled in the UI, and swappable for live Mantle protocols behind the same adapter.

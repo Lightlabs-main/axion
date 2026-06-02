@@ -11,6 +11,7 @@ web/tsconfig.tsbuildinfo
 contracts/artifacts/
 contracts/cache/
 contracts/typechain-types/
+contracts/deployments/localhost.json
 
 # env
 .env

@@ -1,10 +1,17 @@
 import type { Route } from "@/types";
+import { CONTRACTS } from "./config";
 
 /**
- * Simulated DeFi routes used by the Axion demo. These are DEMO ROUTES — the UI
- * always labels them as simulated. The point of the demo is the decision
- * lifecycle (predict → commit → execute → judge → forge → evolve), not real
- * liquidity sourcing.
+ * Candidate routes Axion compares before acting. The numbers here are the
+ * agent's PRE-EXECUTION estimates (what the route advertises). The REALISED
+ * terms come from the deployed on-chain vault (apyBps / depositFeeBps via
+ * `quote()`), which is what the verification step judges against. The gap
+ * between advertised estimate and on-chain reality is exactly what Axion is
+ * built to catch.
+ *
+ * - route-a (High APY Pool)  -> HighApyVault  (unsafe, rejected by policy)
+ * - route-b (Balanced Yield) -> BalancedVault (safe, executed for real)
+ * - route-c (Hold USDC)      -> no vault, no on-chain action
  */
 export const MOCK_ROUTES: Route[] = [
   {
@@ -12,22 +19,22 @@ export const MOCK_ROUTES: Route[] = [
     name: "High APY Pool",
     expectedYieldPct: 12,
     liquidity: "low",
-    slippageBps: 180, // 1.8%
+    slippageBps: 180, // 1.80% advertised
     approvalRisk: "unsafe",
     protocolTrust: "medium",
     risk: "high",
-    isDemoRoute: true,
+    vaultKey: "highApy",
   },
   {
     id: "route-b",
     name: "Balanced Yield Route",
     expectedYieldPct: 6,
     liquidity: "medium",
-    slippageBps: 40, // 0.4%
+    slippageBps: 40, // 0.40% advertised
     approvalRisk: "safe",
     protocolTrust: "high",
     risk: "low-medium",
-    isDemoRoute: true,
+    vaultKey: "balanced",
   },
   {
     id: "route-c",
@@ -38,10 +45,15 @@ export const MOCK_ROUTES: Route[] = [
     approvalRisk: "none",
     protocolTrust: "n/a",
     risk: "lowest",
-    isDemoRoute: true,
   },
 ];
 
 export function getRoute(id: string): Route | undefined {
   return MOCK_ROUTES.find((r) => r.id === id);
+}
+
+/** Resolve a route's deployed vault address (or undefined for Hold). */
+export function vaultAddressFor(route: Route | undefined): string | undefined {
+  if (!route?.vaultKey) return undefined;
+  return route.vaultKey === "highApy" ? CONTRACTS.highApyVault : CONTRACTS.balancedVault;
 }

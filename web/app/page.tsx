@@ -37,7 +37,8 @@ export default function HomePage() {
             </Link>
           </div>
           <div className="mt-4 text-xs text-[var(--muted)]">
-            Runs fully in local demo mode — no wallet or API key required.
+            Runs the full lifecycle as real transactions on Mantle — commitments, vault deposits and
+            judged epochs, all verifiable on-chain.
           </div>
         </div>
 

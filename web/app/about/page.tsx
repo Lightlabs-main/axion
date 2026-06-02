@@ -88,35 +88,39 @@ export default function AboutPage() {
 
       <Block eyebrow="Mantle" title="Where commitments and epochs live">
         <p>
-          Axion targets Mantle&apos;s low-cost EVM environment. Three contracts carry the lifecycle:
-          AxionAgentRegistry (identity, trust, memory root, strategy version),
-          DecisionCommitmentLog (pre-execution tree commitments), and EpochMemoryLog (judged epochs
-          with verdict and score). An optional AxionPolicyVault enforces spend, slippage and
-          approval rules on-chain.
+          Axion targets Mantle&apos;s low-cost EVM environment. The lifecycle is carried by real
+          contracts: AxionAgentRegistry (identity, trust, memory root, strategy version),
+          DecisionCommitmentLog (pre-execution tree commitments), EpochMemoryLog (judged epochs with
+          verdict and score) and AxionPolicyVault (on-chain policy). The execution layer is real too:
+          a MockUSDC test token and AxionYieldVault contracts that the agent deposits into.
         </p>
         <p>
-          The app runs fully in local demo mode with no wallet or contracts. Configure the contract
-          addresses and connect a wallet and the exact same lifecycle writes to Mantle instead.
+          Every step — register, commit, deposit, write-epoch, evolve — is a real Mantle transaction
+          with an explorer link. Connect a wallet on Mantle and the console runs the whole cycle
+          on-chain; the trust score, strategy version and memory root are all updated on-chain.
         </p>
       </Block>
 
       <section className="panel p-7">
         <div className="label mb-2">Honesty</div>
-        <h2 className="font-display text-2xl font-bold">What is real and what is simulated</h2>
+        <h2 className="font-display text-2xl font-bold">What is real and what are test assets</h2>
         <ul className="mt-3 space-y-2 text-[var(--muted)]">
           <li>
-            <strong className="text-[var(--text)]">Real:</strong> the lifecycle, deterministic
-            hashing, judging logic, strategy forging, trust/permission updates, memory-root chaining
-            and local persistence.
+            <strong className="text-[var(--text)]">Real and on-chain:</strong> the full lifecycle —
+            agent registration, decision-tree commitment, the vault deposit of real test USDC, the
+            judged epoch, and the trust/strategy/memory-root evolution. Realised APY and entry fee
+            are read from the vault on-chain.
           </li>
           <li>
-            <strong className="text-[var(--text)]">Simulated and labelled:</strong> the DeFi yield
-            routes and their outcomes, so the demo is reliable without live protocol risk.
+            <strong className="text-[var(--text)]">Test assets, clearly labelled:</strong> aUSDC and
+            the two yield vaults are real contracts deployed by Axion for testing — not third-party
+            DeFi protocols. The advertised route numbers are the agent&apos;s pre-execution
+            estimates; the gap to the on-chain reality is what Axion verifies.
           </li>
           <li>
             <strong className="text-[var(--text)]">Swappable:</strong> skill execution runs through a
-            ByrealSkillAdapter; the local adapter can be replaced with a real Byreal Skills backend
-            without changing the lifecycle.
+            ByrealSkillAdapter; the adapter and the vaults can be replaced with a live Byreal backend
+            and real Mantle protocols without changing the lifecycle.
           </li>
         </ul>
         <Link href="/console" className="btn btn-primary mt-6 inline-flex px-6 py-3">

@@ -2,6 +2,7 @@
 
 import type { Branch, ExecutionResult } from "@/types";
 import { Badge, CopyHash } from "./ui";
+import { txExplorerLink } from "@/lib/config";
 
 const SKILL_DESC: Record<string, string> = {
   RiskCheckSkill: "Checks slippage and liquidity against policy",
@@ -100,6 +101,32 @@ export function ExecutionView({
           <div className="space-y-2">
             <CopyHash label="Action" value={execution.actionHash} />
             <CopyHash label="Outcome" value={execution.outcomeHash} />
+            {typeof execution.creditedUsdc === "number" && execution.creditedUsdc > 0 && (
+              <div className="text-xs text-[var(--muted)]">
+                Credited{" "}
+                <span className="mono text-[var(--text)]">
+                  {execution.creditedUsdc.toFixed(4)} aUSDC
+                </span>
+                {typeof execution.feePaidUsdc === "number" && (
+                  <>
+                    {" "}· fee{" "}
+                    <span className="mono text-[var(--text)]">
+                      {execution.feePaidUsdc.toFixed(4)}
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
+            {execution.txHash && (
+              <a
+                href={txExplorerLink(execution.txHash)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-block text-xs text-[var(--violet)] hover:underline"
+              >
+                View deposit transaction ↗
+              </a>
+            )}
           </div>
         </div>
       </div>

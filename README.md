@@ -41,13 +41,14 @@ It is not a dashboard, a trading bot, a yield recommender, or a chatbot.
 - Full lifecycle console: goal → decision tree → commit → execute → verify → forge → evolve.
 - Deterministic A/B/C/D decision-tree engine with risk/yield/liquidity/approval scoring.
 - Pre-commitment hashing (keccak256 over canonical JSON) of goal, tree, selected branch and policy.
-- Skill execution through a swappable **ByrealSkillAdapter** (local demo adapter included).
+- Skill execution through a swappable **ByrealSkillAdapter** that reads live on-chain vault terms.
+- **Real on-chain execution:** the selected branch deposits real test USDC into a deployed `AxionYieldVault`; realised APY and entry fee are read from chain, not simulated.
 - Outcome verification with five verdicts: Correct, Partially correct, Wrong, Rejected safely, Unsafe blocked.
 - EchoForge strategy evolution + trust score + wallet permission tiers.
 - Append-only memory root chaining (each epoch hashes the previous root).
 - ERC-8004-style agent identity and a Chronos timeline of judged epochs.
 - Optional LLM-authored post-mortems (works fully without an API key).
-- Local demo mode (localStorage) and optional on-chain mode on Mantle — same lifecycle, same code.
+- Every lifecycle step — register, commit, execute, write-epoch, evolve — is a **real Mantle transaction** with an explorer link. Trust score, strategy version and memory root are updated on-chain.
 - Premium dark, futuristic UI; copy-to-clipboard hashes; explorer links; loading/empty/error states.
 
 ## Architecture
@@ -59,10 +60,14 @@ axion/
 │   │   ├── AxionAgentRegistry.sol     # identity, trust, memory root, strategy version
 │   │   ├── DecisionCommitmentLog.sol  # pre-execution decision-tree commitments
 │   │   ├── EpochMemoryLog.sol         # judged epochs (verdict + score + roots)
-│   │   └── AxionPolicyVault.sol       # on-chain spend / slippage / approval policy
-│   ├── scripts/deploy.ts      # deploys all four contracts, writes deployments/<network>.json
-│   ├── test/axion.test.ts     # full test suite for all four contracts
-│   └── hardhat.config.ts      # hardhat, localhost, mantleSepolia (5003), mantle (5000)
+│   │   ├── AxionPolicyVault.sol       # on-chain spend / slippage / approval policy
+│   │   ├── MockUSDC.sol               # real ERC-20 test USDC (6 decimals) with faucet
+│   │   └── AxionYieldVault.sol        # real yield vault: deposit/withdraw, APY + entry fee, accrual
+│   ├── scripts/deploy.ts          # deploys all contracts, funds vaults, writes web/.env.local
+│   ├── scripts/lifecycle-e2e.ts   # on-chain proof of the full lifecycle (register→commit→deposit→epoch→evolve)
+│   ├── test/axion.test.ts         # tests for the four core contracts
+│   ├── test/vault.test.ts         # tests for MockUSDC + AxionYieldVault (deposit, fee, accrual, withdraw)
+│   └── hardhat.config.ts          # hardhat, localhost, mantleSepolia (5003), mantle (5000)
 │
 ├── web/                       # Next.js 14 App Router + TypeScript + Tailwind
 │   ├── app/
@@ -84,16 +89,16 @@ axion/
 
 | File | Responsibility |
 |---|---|
-| `mockRoutes.ts` | Simulated, clearly-labelled DeFi routes (High APY / Balanced / Hold). |
+| `mockRoutes.ts` | Candidate routes (High APY / Balanced / Hold) with their *advertised* estimates, each mapped to a deployed vault address. |
 | `decisionTree.ts` | Scores routes against policy + strategy, builds the A/B/C/D tree, selects a branch. |
 | `hashing.ts` | Canonical keccak256 hashing of goal/tree/branch/policy/action/outcome + memory-root chaining. |
-| `byrealAdapter.ts` | `ByrealSkillAdapter` interface + local adapter; runs skills and produces an execution result. |
+| `byrealAdapter.ts` | `ByrealSkillAdapter` interface + adapter; reads on-chain vault terms and performs the real deposit. |
 | `strategyForge.ts` | Prediction, verdict judging, epoch scoring, EchoForge strategy evolution, post-mortems. |
 | `trustScore.ts` | Trust deltas, clamping, and permission-level tiers. |
 | `agentEngine.ts` | Orchestrates judge → score → post-mortem → forge → memory-root → identity update. |
-| `storage.ts` | localStorage persistence of agent, policy, strategy, trees, commitments, epochs. |
-| `contractClient.ts` | viem clients; on-chain register/commit/writeEpoch with automatic local fallback. |
-| `config.ts` / `abis.ts` | Chain config, contract addresses, explorer links, ABIs. |
+| `storage.ts` | localStorage cache of the agent + on-chain ids/tx hashes so the timeline survives refresh. |
+| `contractClient.ts` | viem public + wallet clients; real register/commit/deposit/writeEpoch/evolve, network switching, event-log id capture, USDC faucet/balance, vault reads. |
+| `config.ts` / `abis.ts` | Chain metadata (testnet 5003 / mainnet 5000), contract + token + vault addresses, explorer links, ABIs. |
 
 ---
 
@@ -105,6 +110,8 @@ All in Solidity `0.8.24`, optimizer on. Events are emitted for every major actio
 - **DecisionCommitmentLog** — `commitDecisionTree`, `getCommitment`, `getAgentCommitments`.
 - **EpochMemoryLog** — `writeEpoch`, `getEpoch`, `getAgentEpochs`. Verdict enum: `Correct, PartiallyCorrect, Wrong, RejectedSafely, UnsafeBlocked`.
 - **AxionPolicyVault** — `setPolicy`, `checkPolicy` (returns `(ok, reasonCode)`), `getPolicy`, `getAllowedAssets`, `getAllowedProtocols`, `pause`, `unpause`.
+- **MockUSDC** — real ERC-20 test USDC (6 decimals): `mint` (owner), permissionless `faucet` (capped), `setFaucetCap`. Mainnet deployments can disable the faucet.
+- **AxionYieldVault** — real yield vault: `deposit` (takes an on-chain entry fee, credits net principal), `withdraw` (principal + accrued), `quote` (realised APY + fee + risk tag), `positionOf`, `accruedYield`, `fundRewards`. Two instances deployed: Balanced (safe, executed for real) and High APY (unsafe, rejected by policy).
 
 ---
 
@@ -119,14 +126,17 @@ All in Solidity `0.8.24`, optimizer on. Events are emitted for every major actio
 
 ## Demo flow
 
-1. Open **Console** and click **Initialise agent** (local mode needs nothing else).
-2. Keep the default goal — *"Use 100 test USDC to find a low-risk yield opportunity on Mantle. Avoid unsafe approvals and high slippage."* — and click **Generate decision tree**.
-3. Review branches A–D. The high-APY route (A) is flagged unsafe and rejected; the balanced route (B) is selected. Click **Commit decision tree** (hashes are frozen here).
-4. Click **Execute selected branch** to run the skills and see the realised outcome.
-5. Click **Verify outcome** to judge reality vs the committed prediction and read the post-mortem.
-6. Click **Forge upgrade & evolve** — watch the trust score, strategy version and memory root change, then open **Identity** to see the new epoch on the timeline.
+> Requires deployed contracts (see Deployment) and a browser wallet (e.g. MetaMask) on Mantle.
 
-Try variations: toggle **Allow unsafe approvals** in the policy card and re-run to see branch A become eligible; **Pause policy** to force a safe rejection (branch D).
+1. Open **Console**, click **Connect wallet** (it auto-switches/adds the Mantle network), then **Get 1,000 test aUSDC** from the faucet.
+2. Click **Register agent** — a real `AxionAgentRegistry.registerAgent` transaction mints the on-chain ERC-8004-style identity.
+3. Keep the default goal — *"Use 100 test USDC to find a low-risk yield opportunity on Mantle. Avoid unsafe approvals and high slippage."* — and click **Generate decision tree**.
+4. Review branches A–D. The high-APY route (A) is flagged unsafe and rejected; the balanced route (B) is selected. Click **Commit decision tree** — the hashes are frozen on-chain.
+5. Click **Execute selected branch** — Axion reads the vault's on-chain terms, runs the safety gates, and **deposits real test aUSDC** into the balanced vault. The deposit tx is linked to the explorer.
+6. Click **Verify outcome** to judge realised on-chain APY/fee vs the committed prediction and read the post-mortem.
+7. Click **Forge upgrade & evolve** — a real `writeEpoch` plus on-chain trust/strategy/memory-root updates. Open **Identity** to see the new epoch on the timeline.
+
+Try variations: toggle **Allow unsafe approvals** in the policy card and re-run to see branch A (the High APY vault) become eligible; **Pause policy** to force a safe rejection (branch D).
 
 ---
 
@@ -138,10 +148,13 @@ Requirements: Node.js 18+ (tested on Node 22) and npm.
 
 ```bash
 cd web
-cp .env.example .env.local      # optional; the app runs with no edits
 npm install
 npm run dev                     # http://localhost:3000
 ```
+
+The landing / about / identity pages render immediately. The **Console** needs deployed
+contract addresses in `web/.env.local` — the deploy script writes that file for you (see
+Deployment). Until then the console shows a setup screen with the exact commands.
 
 Production build / checks:
 
@@ -173,13 +186,17 @@ NEXT_PUBLIC_EXPLORER_URL=https://sepolia.mantlescan.xyz
 NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS=
 NEXT_PUBLIC_DECISION_LOG_ADDRESS=
 NEXT_PUBLIC_EPOCH_LOG_ADDRESS=
+NEXT_PUBLIC_POLICY_VAULT_ADDRESS=
+NEXT_PUBLIC_USDC_ADDRESS=
+NEXT_PUBLIC_BALANCED_VAULT_ADDRESS=
+NEXT_PUBLIC_HIGH_APY_VAULT_ADDRESS=
 PRIVATE_KEY=
-MANTLE_RPC_URL=
+MANTLE_RPC_URL=https://rpc.sepolia.mantle.xyz
 OPENAI_API_KEY=
 BYREAL_API_KEY=
 ```
 
-The app works with **all of these blank**: it runs in local demo mode, uses deterministic post-mortems, and persists to localStorage. Fill the contract addresses (and connect an injected wallet) to switch the exact same lifecycle to on-chain mode. `OPENAI_API_KEY` only enriches post-mortems; nothing breaks without it.
+The `NEXT_PUBLIC_*` addresses drive the real on-chain console and are written automatically by the deploy script. `PRIVATE_KEY` + `MANTLE_RPC_URL` (in `contracts/.env`) are only used for deployment. `OPENAI_API_KEY` only enriches post-mortems — the deterministic post-mortem is used when it is absent, so nothing breaks without it. `BYREAL_API_KEY` is reserved for swapping the skill adapter to a live Byreal backend.
 
 ---
 
@@ -189,17 +206,30 @@ The app works with **all of these blank**: it runs in local demo mode, uses dete
 cd contracts
 cp .env.example .env
 # set PRIVATE_KEY (funded with Mantle Sepolia test MNT) and MANTLE_RPC_URL
+npm install
 
-npx hardhat run scripts/deploy.ts --network mantleSepolia
+npm run deploy:mantle          # = hardhat run scripts/deploy.ts --network mantleSepolia
 ```
 
-The script deploys all four contracts, writes `deployments/mantleSepolia.json`, and prints the `NEXT_PUBLIC_*` lines to paste into `web/.env.local`. Restart the web app and the console will register agents, commit trees and write epochs on Mantle. Mantle Sepolia: chain id **5003**, RPC `https://rpc.sepolia.mantle.xyz`, explorer `https://sepolia.mantlescan.xyz`. Mainnet config (chain id 5000) is included.
+The script deploys all six contracts (core logs + MockUSDC + two vaults), funds each vault's reward reserve, mints test aUSDC to the deployer, writes `deployments/mantleSepolia.json`, **and writes `web/.env.local` automatically**. Restart the web app (`npm run dev`) and the console registers agents, commits trees, deposits into the vault and writes epochs as real Mantle transactions.
+
+You can verify the whole flow on a local chain first:
+
+```bash
+cd contracts
+npx hardhat node                                   # terminal 1
+npm run deploy:local                               # terminal 2
+npx hardhat run scripts/lifecycle-e2e.ts --network localhost   # full on-chain lifecycle proof
+```
+
+Mantle Sepolia: chain id **5003**, RPC `https://rpc.sepolia.mantle.xyz`, explorer `https://sepolia.mantlescan.xyz`. Faucet for test MNT gas: see the Mantle docs. Mainnet (chain id **5000**) is configured in `hardhat.config.ts` and `config.ts`; deploy with `npm run deploy:mantleMainnet` once you have reviewed everything on testnet.
 
 ---
 
 ## How to run tests
 
-- **Contracts:** `cd contracts && npx hardhat test` — covers registry defaults/events/updates/access control, commitment logging, epoch logging and policy checks.
+- **Contracts:** `cd contracts && npx hardhat test` — 13 tests covering registry defaults/events/updates/access control, commitment logging, epoch logging, policy checks, and the token + vault (faucet cap, deposit fee, time-based yield accrual, withdraw, reward funding).
+- **On-chain lifecycle proof:** `cd contracts && npm run e2e:local` (after `deploy:local` against a running `hardhat node`) — runs register → commit → deposit → epoch → evolve and asserts every on-chain id, balance and identity update.
 - **Web type safety:** `cd web && npm run typecheck`.
 - **Web lint + build:** `cd web && npm run lint && npm run build`.
 
@@ -207,9 +237,9 @@ The script deploys all four contracts, writes `deployments/mantleSepolia.json`, 
 
 ## What is real and what is simulated
 
-- **Real:** the lifecycle, deterministic canonical hashing, judging logic, EchoForge strategy evolution, trust/permission updates, memory-root chaining, local persistence, and the Solidity contracts.
-- **Simulated and labelled:** the DeFi yield routes and their outcomes, so the demo is reliable without live protocol risk. The UI says so plainly.
-- **Swappable:** skill execution runs through `ByrealSkillAdapter`; the local adapter can be replaced with a real Byreal Skills backend without touching the lifecycle. No nonexistent SDKs are imported.
+- **Real and on-chain:** every lifecycle step is a real Mantle transaction — agent registration, decision-tree commitment, the **vault deposit of real test USDC**, the judged epoch, and the trust/strategy/memory-root evolution. Realised APY and entry fee are read from the vault via `quote()`; the entry fee is charged on-chain. All hashing, judging, EchoForge evolution and the contracts are real.
+- **Test assets, clearly labelled:** `aUSDC` and the two `AxionYieldVault`s are real contracts **deployed by Axion for testing** — they are not third-party DeFi protocols, and the UI says so plainly. The *advertised* route numbers (12% / 6% / 0%) are the agent's pre-execution estimates; the gap between those and the on-chain realised terms is exactly what Axion verifies.
+- **Swappable:** skill execution runs through `ByrealSkillAdapter`; the adapter can be replaced with a real Byreal Skills backend, and the vaults swapped for live Mantle protocols, without touching the lifecycle. No nonexistent SDKs are imported.
 
 ## Future roadmap
 

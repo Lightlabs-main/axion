@@ -1,6 +1,6 @@
 # Axion — 5-Minute Demo Script
 
-A tight, judge-ready walkthrough. The app runs in local demo mode, so nothing needs to be configured beforehand.
+A tight, judge-ready walkthrough. Prerequisite: contracts deployed to Mantle Sepolia (`npm run deploy:mantle`, which writes `web/.env.local`) and a browser wallet such as MetaMask. Every step below is a real on-chain transaction with an explorer link.
 
 ## Minute 1 — The problem
 
@@ -10,7 +10,7 @@ Open the **Landing** page. AI wallets are black boxes: they act first and explai
 
 ## Minute 2 — The goal
 
-Click **Launch Demo** to open the **Console** and **Initialise agent** (local mode). Show the default goal:
+Click **Launch Demo** to open the **Console**. Click **Connect wallet** (it auto-adds/switches to Mantle), then **Get 1,000 test aUSDC** from the faucet, then **Register agent** — a real `registerAgent` transaction mints the on-chain identity (note the agent id). Show the default goal:
 
 > "Use 100 test USDC to find a low-risk yield opportunity on Mantle. Avoid unsafe approvals and high slippage."
 
@@ -25,21 +25,21 @@ Click **Generate decision tree**. Walk through the four branches:
 - **C · Hold USDC** — capital-preserving **fallback**.
 - **D · Reject Execution** — used only when nothing is safe.
 
-Show the pre-commitment hashes (goal, tree, selected branch, policy). Click **Commit decision tree**.
+Show the pre-commitment hashes (goal, tree, selected branch, policy). Click **Commit decision tree** — confirm the wallet transaction and open the linked commitment tx on the explorer.
 
-> "Every goal becomes a decision tree." These hashes are frozen before any action — Axion cannot rewrite what it predicted.
+> "Every goal becomes a decision tree." These hashes are frozen on-chain before any action — Axion cannot rewrite what it predicted.
 
 ## Minute 4 — Execution and verification
 
-Click **Execute selected branch**. Show the skill trace running through the Byreal-compatible adapter — RiskCheck, RouteCompare, ApprovalGuard, Execution, OutcomeVerifier — and the realised yield and slippage.
+Click **Execute selected branch**. Axion reads the target vault's on-chain terms (`quote()`), runs the skill trace through the Byreal-compatible adapter — RouteCompare, RiskCheck, ApprovalGuard, Execution, OutcomeVerifier — and **deposits real test aUSDC into the AxionYieldVault**. Open the deposit transaction on the explorer; note the realised APY and the on-chain entry fee.
 
-Click **Verify outcome**. Axion compares reality against the committed prediction, assigns a verdict (e.g. *Partially correct*: yield came in slightly below the brochure), and writes a structured post-mortem of what was right and wrong.
+Click **Verify outcome**. Axion compares the realised on-chain terms against the committed prediction, assigns a verdict, and writes a structured post-mortem of what was right and wrong.
 
 > "Every execution becomes a judged epoch."
 
 ## Minute 5 — Evolution
 
-Click **Forge upgrade & evolve**. Show the strategy version increment, the trust score change, and the new memory root. EchoForge has nudged the strategy weights based on the verified result. Open the **Identity** page to show the updated ERC-8004-style identity and the new epoch on the Chronos timeline.
+Click **Forge upgrade & evolve**. This writes the judged epoch on-chain (`writeEpoch`) and updates the agent's trust score, strategy version and memory root via real transactions. Open the linked epoch tx, then the **Identity** page to show the updated ERC-8004-style identity and the new epoch on the Chronos timeline.
 
 > "Every outcome forges the next strategy."
 
@@ -49,6 +49,6 @@ Click **Forge upgrade & evolve**. Show the strategy version increment, the trust
 
 ## Optional follow-ups (if time allows)
 
-- Toggle **Allow unsafe approvals** and re-run: branch A becomes eligible — show how policy changes the decision.
-- **Pause policy** and re-run: Axion selects branch D and records a **Rejected safely** epoch (a safe rejection is a success, +4 trust).
-- Refresh the page: the timeline persists (localStorage).
+- Toggle **Allow unsafe approvals** and re-run: branch A (the High APY vault) becomes eligible — execution will deposit into the unsafe vault instead, showing how policy changes the real action.
+- **Pause policy** and re-run: Axion selects branch D and records a **Rejected safely** epoch (a safe rejection is a success, +4 trust) — no funds move.
+- Refresh the page: the timeline persists (local cache of on-chain ids); the canonical record lives on Mantle and can be read back via the contract getters.

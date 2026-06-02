@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Address } from "viem";
 import type {
   AgentIdentity,
   AxionDemoState,
@@ -25,14 +26,23 @@ import { generateDecisionTree } from "@/lib/decisionTree";
 import { LocalByrealAdapter, executeBranch } from "@/lib/byrealAdapter";
 import { judgeAndForge, type JudgeForgeResult } from "@/lib/agentEngine";
 import {
-  canTransactOnchain,
   commitDecisionTreeOnchain,
   connectWallet,
+  evolveIdentityOnchain,
+  faucetUsdc,
+  getChainId,
+  getUsdcBalance,
   hasInjectedWallet,
   registerAgentOnchain,
   writeEpochOnchain,
 } from "@/lib/contractClient";
-import { isOnchainConfigured, txExplorerLink } from "@/lib/config";
+import {
+  ACTIVE_CHAIN,
+  CHAIN_ID,
+  addressExplorerLink,
+  isOnchainConfigured,
+  txExplorerLink,
+} from "@/lib/config";
 import { ZERO_ROOT } from "@/lib/hashing";
 import { START_TRUST_SCORE } from "@/lib/trustScore";
 import { LifecycleStepper } from "@/components/LifecycleStepper";
@@ -55,6 +65,11 @@ export default function ConsolePage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Wallet / chain state.
+  const [account, setAccount] = useState<Address | null>(null);
+  const [chainId, setChainId] = useState<number | null>(null);
+  const [usdc, setUsdc] = useState<number>(0);
+
   // Ephemeral lifecycle working state (current run).
   const [tree, setTree] = useState<DecisionTree | null>(null);
   const [commitment, setCommitment] = useState<Commitment | null>(null);
@@ -64,9 +79,22 @@ export default function ConsolePage() {
 
   const resultRef = useRef<HTMLDivElement | null>(null);
 
+  const configured = isOnchainConfigured();
+  const hasWallet = hasInjectedWallet();
+
   useEffect(() => {
     setState(loadState());
     setMounted(true);
+  }, []);
+
+  const refreshWallet = useCallback(async (acc: Address) => {
+    try {
+      const [cid, bal] = await Promise.all([getChainId(), getUsdcBalance(acc)]);
+      setChainId(cid);
+      setUsdc(bal);
+    } catch {
+      /* non-fatal */
+    }
   }, []);
 
   function persist(next: AxionDemoState) {
@@ -94,30 +122,51 @@ export default function ConsolePage() {
 
   const agent = state.agent;
   const selectedBranch = tree?.branches.find((b) => b.id === tree.selectedBranchId);
+  const wrongChain = account !== null && chainId !== null && chainId !== CHAIN_ID;
+
+  async function handleConnect() {
+    setError(null);
+    setBusy("connect");
+    try {
+      const acc = await connectWallet();
+      if (!acc) throw new Error("No account returned from wallet.");
+      setAccount(acc);
+      await refreshWallet(acc);
+      setNotice("Wallet connected.");
+    } catch (e) {
+      setError(humanError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleFaucet() {
+    if (!account) return;
+    setError(null);
+    setBusy("faucet");
+    try {
+      await faucetUsdc(account, 1000);
+      await refreshWallet(account);
+      setNotice("Minted 1,000 test aUSDC to your wallet.");
+    } catch (e) {
+      setError(humanError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function initAgent() {
+    if (!account) return;
     setError(null);
     setBusy("init");
     try {
-      let owner = "local";
-      let mode: "local" | "onchain" = "local";
-      let txHash: string | undefined;
       const metadataURI = "ipfs://axion-agent/erc8004.json";
-
-      if (canTransactOnchain()) {
-        const account = await connectWallet();
-        if (account) {
-          owner = account;
-          const res = await registerAgentOnchain(account, "Axion", metadataURI);
-          mode = res.mode;
-          txHash = res.txHash;
-        }
-      }
+      const res = await registerAgentOnchain(account, "Axion", metadataURI);
 
       const newAgent: AgentIdentity = {
-        agentId: mode === "onchain" ? `mantle-${Date.now()}` : `axion-local-${Date.now()}`,
+        agentId: res.agentId.toString(),
         agentName: "Axion",
-        owner,
+        owner: account,
         metadataURI,
         strategyVersion: 1,
         memoryRoot: ZERO_ROOT,
@@ -128,15 +177,11 @@ export default function ConsolePage() {
         failedPredictions: 0,
         selfCorrections: 0,
         createdAt: Date.now(),
-        mode,
-        txHash,
+        mode: "onchain",
+        txHash: res.txHash,
       };
       persist(withAgent(state!, newAgent));
-      setNotice(
-        mode === "onchain"
-          ? "Agent registered on Mantle."
-          : "Agent initialised in local demo mode."
-      );
+      setNotice(`Agent #${res.agentId} registered on ${ACTIVE_CHAIN.name}.`);
     } catch (e) {
       setError(humanError(e));
     } finally {
@@ -160,34 +205,21 @@ export default function ConsolePage() {
   }
 
   async function handleCommit() {
-    if (!agent || !tree) return;
+    if (!agent || !tree || !account) return;
     setError(null);
     setBusy("commit");
     try {
-      let mode: "local" | "onchain" = "local";
-      let txHash: string | undefined;
-      if (canTransactOnchain()) {
-        const account = await connectWallet();
-        if (account) {
-          try {
-            const res = await commitDecisionTreeOnchain(
-              account,
-              BigInt(0),
-              tree.goalHash as `0x${string}`,
-              tree.treeHash as `0x${string}`,
-              tree.selectedBranchHash as `0x${string}`,
-              tree.policyHash as `0x${string}`,
-              BigInt(tree.strategyVersion)
-            );
-            mode = res.mode;
-            txHash = res.txHash;
-          } catch {
-            mode = "local"; // never break the demo on a chain hiccup
-          }
-        }
-      }
+      const res = await commitDecisionTreeOnchain(
+        account,
+        BigInt(agent.agentId),
+        tree.goalHash as `0x${string}`,
+        tree.treeHash as `0x${string}`,
+        tree.selectedBranchHash as `0x${string}`,
+        tree.policyHash as `0x${string}`,
+        BigInt(tree.strategyVersion)
+      );
       const c: Commitment = {
-        commitmentId: `commit-${Date.now()}`,
+        commitmentId: res.commitmentId.toString(),
         agentId: agent.agentId,
         goalHash: tree.goalHash,
         treeHash: tree.treeHash,
@@ -195,14 +227,12 @@ export default function ConsolePage() {
         policyHash: tree.policyHash,
         strategyVersion: tree.strategyVersion,
         timestamp: Date.now(),
-        mode,
-        txHash,
+        mode: "onchain",
+        txHash: res.txHash,
       };
       setCommitment(c);
       persist(addCommitment(state!, c));
-      setNotice(
-        mode === "onchain" ? "Decision tree committed on Mantle." : "Decision tree committed (local hash)."
-      );
+      setNotice(`Decision tree committed on-chain · commitment #${res.commitmentId}.`);
       scrollToResult();
     } catch (e) {
       setError(humanError(e));
@@ -211,13 +241,14 @@ export default function ConsolePage() {
     }
   }
 
-  function handleExecute() {
-    if (!tree || !selectedBranch) return;
+  async function handleExecute() {
+    if (!tree || !selectedBranch || !account) return;
     setError(null);
     setBusy("execute");
     try {
-      const result = executeBranch(adapter, selectedBranch, state!.policy);
+      const result = await executeBranch(adapter, selectedBranch, state!.policy, account);
       setExecution(result);
+      await refreshWallet(account);
       scrollToResult();
     } catch (e) {
       setError(humanError(e));
@@ -231,28 +262,19 @@ export default function ConsolePage() {
     setError(null);
     setBusy("verify");
     try {
-      // Try to enrich the post-mortem via the API (LLM if a key is set,
-      // deterministic fallback otherwise). Never break if it fails.
       let llmPostMortem: PostMortem | null = null;
       try {
         const res = await fetch("/api/postmortem", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            goal: tree.goal,
-            branch: selectedBranch,
-            prediction: {
-              expectedYieldPct: selectedBranch?.routeId ? execution.actualYieldPct : 0,
-            },
-            execution,
-          }),
+          body: JSON.stringify({ goal: tree.goal, branch: selectedBranch, execution }),
         });
         if (res.ok) {
           const data = (await res.json()) as { postMortem?: PostMortem | null };
           if (data.postMortem) llmPostMortem = data.postMortem;
         }
       } catch {
-        /* deterministic fallback is used inside judgeAndForge */
+        /* deterministic fallback used inside judgeAndForge */
       }
 
       const result = judgeAndForge({
@@ -273,43 +295,45 @@ export default function ConsolePage() {
   }
 
   async function handleForge() {
-    if (!agent || !commitment || !judged) return;
+    if (!agent || !commitment || !judged || !account) return;
     setError(null);
     setBusy("forge");
     try {
-      let epoch = judged.epoch;
-      // Persist epoch on-chain if configured.
-      if (canTransactOnchain() && commitment.mode === "onchain") {
-        try {
-          const account = await connectWallet();
-          if (account) {
-            const res = await writeEpochOnchain(
-              account,
-              BigInt(0),
-              BigInt(0),
-              epoch.actionHash as `0x${string}`,
-              epoch.outcomeHash as `0x${string}`,
-              epoch.postMortemHash as `0x${string}`,
-              epoch.verdict,
-              BigInt(epoch.score),
-              epoch.memoryRootAfter as `0x${string}`,
-              BigInt(epoch.strategyVersionAfter)
-            );
-            if (res.mode === "onchain") {
-              epoch = { ...epoch, mode: "onchain", txHash: res.txHash };
-            }
-          }
-        } catch {
-          /* keep local epoch */
-        }
-      }
+      const epochResult = await writeEpochOnchain(
+        account,
+        BigInt(agent.agentId),
+        BigInt(commitment.commitmentId),
+        judged.epoch.actionHash as `0x${string}`,
+        judged.epoch.outcomeHash as `0x${string}`,
+        judged.epoch.postMortemHash as `0x${string}`,
+        judged.epoch.verdict,
+        BigInt(judged.epoch.score),
+        judged.epoch.memoryRootAfter as `0x${string}`,
+        BigInt(judged.epoch.strategyVersionAfter)
+      );
+
+      // Evolve the on-chain identity (trust, strategy version, memory root, epoch count).
+      await evolveIdentityOnchain(
+        account,
+        BigInt(agent.agentId),
+        BigInt(judged.newAgent.trustScore),
+        BigInt(judged.epoch.strategyVersionAfter),
+        judged.epoch.memoryRootAfter as `0x${string}`
+      );
+
+      const epoch = {
+        ...judged.epoch,
+        epochId: epochResult.epochId.toString(),
+        mode: "onchain" as const,
+        txHash: epochResult.txHash,
+      };
 
       let next = addEpoch(state!, epoch);
       next = withAgent(next, judged.newAgent);
       next = withStrategy(next, judged.newStrategy);
       persist(next);
       setPersisted(true);
-      setNotice("Strategy forged and agent evolved. Epoch written to the timeline.");
+      setNotice(`Epoch #${epochResult.epochId} written on-chain. Agent evolved.`);
       scrollToResult();
     } catch (e) {
       setError(humanError(e));
@@ -326,7 +350,7 @@ export default function ConsolePage() {
     setExecution(null);
     setJudged(null);
     setPersisted(false);
-    setNotice("Demo state cleared.");
+    setNotice("Local cache cleared. On-chain history is permanent.");
   }
 
   function startNewRun() {
@@ -345,32 +369,42 @@ export default function ConsolePage() {
     });
   }
 
-  const onchainBadge = isOnchainConfigured() ? (
-    hasInjectedWallet() ? (
-      <Badge tone="emerald">On-chain ready</Badge>
-    ) : (
-      <Badge tone="amber">On-chain configured · connect wallet</Badge>
-    )
-  ) : (
-    <Badge tone="violet">Local demo mode</Badge>
-  );
+  // ---- Gating screens (honest: no simulated fallback) ----
+  if (!configured) {
+    return <SetupGate />;
+  }
+  if (!hasWallet) {
+    return (
+      <Gate
+        title="Connect a browser wallet"
+        body="Axion runs the full lifecycle as real transactions on Mantle. Install MetaMask (or any EIP-1193 wallet) and reload this page."
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="label mb-1">Agent console</div>
+          <div className="label mb-1">Agent console · {ACTIVE_CHAIN.name}</div>
           <h1 className="font-display text-3xl font-extrabold">
             Run the <span className="gradient-text">lifecycle</span>
           </h1>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Most AI wallets act first and explain later. Axion commits before it acts.
+            Most AI wallets act first and explain later. Axion commits before it acts — on-chain.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {onchainBadge}
+          {account ? (
+            <Badge tone={wrongChain ? "amber" : "emerald"}>
+              {wrongChain ? "Wrong network" : `${account.slice(0, 6)}…${account.slice(-4)}`}
+            </Badge>
+          ) : (
+            <Badge tone="violet">Wallet not connected</Badge>
+          )}
+          {account && <Badge tone="teal">{usdc.toFixed(2)} aUSDC</Badge>}
           <button onClick={handleReset} className="btn btn-ghost text-xs">
-            Reset demo
+            Clear cache
           </button>
         </div>
       </div>
@@ -388,25 +422,39 @@ export default function ConsolePage() {
         </div>
       )}
 
-      {!agent ? (
+      {!account ? (
         <div className="panel p-8 text-center">
-          <h2 className="font-display text-xl font-bold">Initialise the Axion agent</h2>
+          <h2 className="font-display text-xl font-bold">Connect your wallet</h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-[var(--muted)]">
-            Create the ERC-8004-style identity that will own every commitment and epoch. In local
-            mode this lives in your browser. With contracts configured and a wallet connected, it
-            registers on Mantle.
+            Connect to {ACTIVE_CHAIN.name} to register the agent and run the lifecycle as real
+            transactions. You can mint free test aUSDC once connected.
           </p>
           <button
-            onClick={initAgent}
-            disabled={busy === "init"}
+            onClick={handleConnect}
+            disabled={busy === "connect"}
             className="btn btn-primary mx-auto mt-5 px-6 py-3"
           >
-            {busy === "init" ? "Initialising…" : "Initialise agent"}
+            {busy === "connect" ? "Connecting…" : "Connect wallet"}
           </button>
+        </div>
+      ) : !agent ? (
+        <div className="panel p-8 text-center">
+          <h2 className="font-display text-xl font-bold">Register the Axion agent</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-[var(--muted)]">
+            Create the ERC-8004-style identity on-chain. It will own every commitment and epoch you
+            produce, with a trust score starting at {START_TRUST_SCORE}.
+          </p>
+          <div className="mt-5 flex items-center justify-center gap-2">
+            <button onClick={initAgent} disabled={busy === "init"} className="btn btn-primary px-6 py-3">
+              {busy === "init" ? "Registering on-chain…" : "Register agent"}
+            </button>
+            <button onClick={handleFaucet} disabled={busy === "faucet"} className="btn btn-ghost">
+              {busy === "faucet" ? "Minting…" : "Get 1,000 test aUSDC"}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-          {/* Left: lifecycle controls + results */}
           <div className="space-y-6">
             <div className="panel p-5">
               <SectionTitle eyebrow="Step 1 · Predict" title="Goal" />
@@ -426,31 +474,20 @@ export default function ConsolePage() {
                     New run
                   </button>
                 )}
-                <span className="text-xs text-[var(--muted)]">
-                  Every goal becomes a decision tree.
-                </span>
+                <span className="text-xs text-[var(--muted)]">Every goal becomes a decision tree.</span>
               </div>
             </div>
 
             <div ref={resultRef} className="space-y-6">
               {tree && (
                 <section>
-                  <SectionTitle
-                    eyebrow="Step 2 · Commit"
-                    title="Decision tree"
-                  >
+                  <SectionTitle eyebrow="Step 2 · Commit" title="Decision tree">
                     {!commitment ? (
-                      <button
-                        onClick={handleCommit}
-                        disabled={busy === "commit"}
-                        className="btn btn-primary"
-                      >
-                        {busy === "commit" ? "Committing…" : "Commit decision tree"}
+                      <button onClick={handleCommit} disabled={busy === "commit"} className="btn btn-primary">
+                        {busy === "commit" ? "Committing on-chain…" : "Commit decision tree"}
                       </button>
                     ) : (
-                      <Badge tone={commitment.mode === "onchain" ? "emerald" : "violet"}>
-                        Committed · {commitment.mode}
-                      </Badge>
+                      <Badge tone="emerald">Committed · #{commitment.commitmentId}</Badge>
                     )}
                   </SectionTitle>
                   <DecisionTreeView tree={tree} />
@@ -471,12 +508,8 @@ export default function ConsolePage() {
                 <section>
                   <SectionTitle eyebrow="Step 3 · Execute" title="Execution & skills">
                     {!execution ? (
-                      <button
-                        onClick={handleExecute}
-                        disabled={busy === "execute"}
-                        className="btn btn-primary"
-                      >
-                        {busy === "execute" ? "Executing…" : "Execute selected branch"}
+                      <button onClick={handleExecute} disabled={busy === "execute"} className="btn btn-primary">
+                        {busy === "execute" ? "Executing on-chain…" : "Execute selected branch"}
                       </button>
                     ) : (
                       <Badge tone={execution.succeeded ? "emerald" : "rose"}>
@@ -485,15 +518,15 @@ export default function ConsolePage() {
                     )}
                   </SectionTitle>
                   {execution ? (
-                    <ExecutionView
-                      branch={selectedBranch}
-                      execution={execution}
-                      adapterName={adapter.name}
-                    />
+                    <ExecutionView branch={selectedBranch} execution={execution} adapterName={adapter.name} />
                   ) : (
                     <div className="panel p-5 text-sm text-[var(--muted)]">
-                      Selected branch <strong className="text-[var(--text)]">{selectedBranch.id} · {selectedBranch.name}</strong> is
-                      ready. Execution runs it through the skill adapter with hard safety gates.
+                      Selected branch{" "}
+                      <strong className="text-[var(--text)]">
+                        {selectedBranch.id} · {selectedBranch.name}
+                      </strong>{" "}
+                      is ready. Execution reads the vault&apos;s on-chain terms, runs the safety
+                      gates, and deposits real test aUSDC if it passes.
                     </div>
                   )}
                 </section>
@@ -503,11 +536,7 @@ export default function ConsolePage() {
                 <section>
                   <SectionTitle eyebrow="Step 4 · Judge" title="Verify outcome vs prediction">
                     {!judged ? (
-                      <button
-                        onClick={handleVerify}
-                        disabled={busy === "verify"}
-                        className="btn btn-primary"
-                      >
+                      <button onClick={handleVerify} disabled={busy === "verify"} className="btn btn-primary">
                         {busy === "verify" ? "Verifying…" : "Verify outcome"}
                       </button>
                     ) : (
@@ -518,8 +547,8 @@ export default function ConsolePage() {
                     <EpochView epoch={judged.epoch} />
                   ) : (
                     <div className="panel p-5 text-sm text-[var(--muted)]">
-                      Axion will compare the realised outcome against the prediction it committed
-                      before acting, then write a judged post-mortem.
+                      Axion compares the realised on-chain outcome against the prediction it committed
+                      before acting, then writes a judged post-mortem.
                     </div>
                   )}
                 </section>
@@ -529,12 +558,8 @@ export default function ConsolePage() {
                 <section>
                   <SectionTitle eyebrow="Step 5 · Forge → Evolve" title="Forge next strategy">
                     {!persisted ? (
-                      <button
-                        onClick={handleForge}
-                        disabled={busy === "forge"}
-                        className="btn btn-primary"
-                      >
-                        {busy === "forge" ? "Forging…" : "Forge upgrade & evolve"}
+                      <button onClick={handleForge} disabled={busy === "forge"} className="btn btn-primary">
+                        {busy === "forge" ? "Writing epoch on-chain…" : "Forge upgrade & evolve"}
                       </button>
                     ) : (
                       <Badge tone="emerald">Evolved</Badge>
@@ -551,13 +576,18 @@ export default function ConsolePage() {
                           after={`v${judged.epoch.strategyVersionAfter}`}
                         />
                         <Evolve label="Total epochs" before={agent.totalEpochs} after={judged.newAgent.totalEpochs} />
-                        <Evolve
-                          label="Verdict"
-                          before=""
-                          after={judged.epoch.verdict}
-                          single
-                        />
+                        <Evolve label="Verdict" before="" after={judged.epoch.verdict} single />
                       </div>
+                      {judged.epoch.txHash && (
+                        <a
+                          href={txExplorerLink(judged.epoch.txHash)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-3 inline-block text-xs text-[var(--violet)] hover:underline"
+                        >
+                          View epoch transaction ↗
+                        </a>
+                      )}
                       <div className="mt-5 flex flex-wrap gap-2">
                         <Link href="/identity" className="btn btn-primary">
                           View identity & timeline →
@@ -567,14 +597,14 @@ export default function ConsolePage() {
                         </button>
                       </div>
                       <p className="mt-4 text-xs text-[var(--muted)]">
-                        Every outcome forges the next strategy. The wallet&apos;s memory is not
-                        cosmetic — it changed the trust score, permissions and strategy version above.
+                        Every outcome forges the next strategy. The trust score, strategy version and
+                        memory root above were all updated on-chain.
                       </p>
                     </div>
                   ) : (
                     <div className="panel p-5 text-sm text-[var(--muted)]">
-                      Forging applies the verified outcome to the strategy weights, bumps the
-                      strategy version, updates the trust score and chains a new memory root.
+                      Forging writes the judged epoch to the EpochMemoryLog and updates the agent&apos;s
+                      on-chain trust score, strategy version and memory root.
                     </div>
                   )}
                 </section>
@@ -582,7 +612,6 @@ export default function ConsolePage() {
             </div>
           </div>
 
-          {/* Right: policy + identity snapshot */}
           <div className="space-y-6">
             <PolicyCard
               policy={state.policy}
@@ -601,16 +630,29 @@ export default function ConsolePage() {
             />
 
             <div className="panel p-5">
-              <SectionTitle title="Agent snapshot" />
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <Snap label="Name" value={agent.agentName} />
-                <Snap label="Trust" value={String(agent.trustScore)} />
-                <Snap label="Strategy" value={`v${agent.strategyVersion}`} />
-                <Snap label="Epochs" value={String(agent.totalEpochs)} />
-                <Snap label="Correct" value={String(agent.correctPredictions)} />
-                <Snap label="Safe rejections" value={String(agent.safeRejections)} />
+              <div className="flex items-center justify-between">
+                <SectionTitle title="Wallet" />
+                <button onClick={handleFaucet} disabled={busy === "faucet"} className="btn btn-ghost text-xs">
+                  {busy === "faucet" ? "Minting…" : "+1,000 aUSDC"}
+                </button>
               </div>
-              <Link href="/identity" className="btn btn-ghost mt-4 w-full">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <Snap label="Network" value={ACTIVE_CHAIN.name} />
+                <Snap label="aUSDC" value={usdc.toFixed(2)} />
+                <Snap label="Agent ID" value={`#${agent.agentId}`} />
+                <Snap label="Trust" value={String(agent.trustScore)} />
+              </div>
+              {agent.owner && (
+                <a
+                  href={addressExplorerLink(agent.owner)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 inline-block text-xs text-[var(--violet)] hover:underline"
+                >
+                  View owner on explorer ↗
+                </a>
+              )}
+              <Link href="/identity" className="btn btn-ghost mt-3 w-full">
                 Open full identity →
               </Link>
             </div>
@@ -618,14 +660,48 @@ export default function ConsolePage() {
             <div className="panel p-5">
               <div className="label mb-2">Honesty note</div>
               <p className="text-xs leading-relaxed text-[var(--muted)]">
-                DeFi routes in this demo are simulated and clearly labelled. The lifecycle —
-                pre-commitment, execution, verification, post-mortem and evolution — is real and
-                deterministic, and persists across refresh via local storage.
+                aUSDC and the yield vaults are real contracts deployed by Axion for testing — they
+                are not third-party DeFi protocols. The advertised route numbers are the agent&apos;s
+                pre-execution estimates; the realised APY and entry fee are read from the vault
+                on-chain, and deposits are real transactions you can verify on the explorer.
               </p>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function SetupGate() {
+  return (
+    <Gate
+      title="Contracts not configured yet"
+      body="The real on-chain build needs deployed Mantle addresses. Deploy the contracts, then set them in web/.env.local and reload."
+    >
+      <pre className="mono mt-4 overflow-x-auto rounded-xl border border-[var(--border)] bg-black/40 p-4 text-left text-xs text-[var(--muted)]">
+{`# 1. add a funded key to contracts/.env
+PRIVATE_KEY=0x...
+
+# 2. deploy to Mantle Sepolia
+cd contracts && npm run deploy:mantle
+
+# 3. the script writes web/.env.local for you
+# 4. restart the web app`}
+      </pre>
+    </Gate>
+  );
+}
+
+function Gate({ title, body, children }: { title: string; body: string; children?: React.ReactNode }) {
+  return (
+    <div className="space-y-6">
+      <LifecycleStepper current={0} />
+      <div className="panel p-8 text-center">
+        <h2 className="font-display text-xl font-bold">{title}</h2>
+        <p className="mx-auto mt-2 max-w-lg text-sm text-[var(--muted)]">{body}</p>
+        {children}
+      </div>
     </div>
   );
 }
@@ -669,5 +745,8 @@ function Snap({ label, value }: { label: string; value: string }) {
 function humanError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
   if (/user rejected|denied/i.test(msg)) return "Wallet request was rejected.";
-  return `Something went wrong: ${msg}. The demo continues in local mode.`;
+  if (/insufficient funds/i.test(msg)) return "Insufficient MNT for gas. Top up your wallet.";
+  if (/insufficient balance|transfer amount exceeds/i.test(msg))
+    return "Not enough aUSDC. Use the faucet to mint test tokens first.";
+  return `Something went wrong: ${msg}`;
 }
