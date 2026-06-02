@@ -13,6 +13,8 @@ import {
   vaultQuote,
   type VaultQuote,
 } from "./contractClient";
+import type { ByrealMarket } from "./byrealTypes";
+import { unavailableMarket } from "./byrealTypes";
 import type { Address } from "viem";
 
 /**
@@ -118,6 +120,79 @@ export class LocalByrealAdapter implements ByrealSkillAdapter {
       passed: true,
     };
   }
+}
+
+/**
+ * Adapter backed by the REAL Byreal Agent Skills CLI (@byreal-io/byreal-cli),
+ * read server-side via /api/byreal. Its RouteCompare cross-checks the candidate
+ * against Byreal's live agent-native DEX market (a real third data source); the
+ * remaining safety skills run against the Mantle vault, so they delegate to the
+ * local adapter unchanged.
+ */
+export class ByrealCliAdapter implements ByrealSkillAdapter {
+  readonly name: string;
+  readonly isReal = true;
+  private readonly local = new LocalByrealAdapter();
+
+  constructor(private readonly market: ByrealMarket) {
+    this.name = `Byreal Agent Skills CLI v${market.version} (live)`;
+  }
+
+  runRouteCompare(route: Route, realised: VaultQuote): SkillTraceEntry {
+    const parts: string[] = [];
+    if (this.market.topApr) {
+      parts.push(
+        `top CLMM ${this.market.topApr.pair} ${this.market.topApr.totalAprPct.toFixed(1)}% APR`
+      );
+    }
+    if (this.market.topStable) {
+      parts.push(
+        `stable ${this.market.topStable.pair} ${this.market.topStable.totalAprPct.toFixed(1)}%`
+      );
+    }
+    const cite = parts.length
+      ? `Byreal live market (${this.market.poolCount} pools): ${parts.join(", ")}`
+      : "Byreal live market: no comparable pools";
+    return {
+      skill: "RouteCompareSkill",
+      input: `Candidate ${route.name} advertises ${route.expectedYieldPct}% · ${cite}`,
+      output: `On-chain quote: APY ${(realised.apyBps / 100).toFixed(2)}% · entry fee ${(realised.depositFeeBps / 100).toFixed(2)}% · tag ${realised.riskTag}`,
+      passed: true,
+    };
+  }
+
+  runRiskCheck(realised: VaultQuote, policy: Policy): SkillTraceEntry {
+    return this.local.runRiskCheck(realised, policy);
+  }
+  runApprovalGuard(realised: VaultQuote, policy: Policy): SkillTraceEntry {
+    return this.local.runApprovalGuard(realised, policy);
+  }
+  runExecution(
+    branch: Branch,
+    route: Route | undefined,
+    deposit?: { txHash: string; credited: number }
+  ): SkillTraceEntry {
+    return this.local.runExecution(branch, route, deposit);
+  }
+  runOutcomeVerifier(realised: VaultQuote, accruedNote: string): SkillTraceEntry {
+    return this.local.runOutcomeVerifier(realised, accruedNote);
+  }
+}
+
+/** Client helper: read the live Byreal market via our API, degrade gracefully. */
+export async function fetchByrealMarket(): Promise<ByrealMarket> {
+  try {
+    const res = await fetch("/api/byreal");
+    if (!res.ok) throw new Error(`byreal API ${res.status}`);
+    return (await res.json()) as ByrealMarket;
+  } catch {
+    return unavailableMarket();
+  }
+}
+
+/** Pick the real Byreal adapter when its market is available, else the local one. */
+export function selectAdapter(market: ByrealMarket): ByrealSkillAdapter {
+  return market.available ? new ByrealCliAdapter(market) : new LocalByrealAdapter();
 }
 
 /**

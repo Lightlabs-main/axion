@@ -23,7 +23,13 @@ import {
 } from "@/lib/storage";
 import { generateDecisionTree } from "@/lib/decisionTree";
 import { fetchRouteCatalog, type RouteFeed } from "@/lib/routeFeed";
-import { LocalByrealAdapter, executeBranch } from "@/lib/byrealAdapter";
+import {
+  LocalByrealAdapter,
+  executeBranch,
+  fetchByrealMarket,
+  selectAdapter,
+  type ByrealSkillAdapter,
+} from "@/lib/byrealAdapter";
 import { judgeAndForge, type JudgeForgeResult } from "@/lib/agentEngine";
 import {
   commitDecisionTreeOnchain,
@@ -46,8 +52,6 @@ import { SectionTitle, Badge } from "@/components/ui";
 const DEFAULT_GOAL =
   "Use 100 test USDC to find a low-risk yield opportunity on Mantle. Avoid unsafe approvals and high slippage.";
 
-const adapter = new LocalByrealAdapter();
-
 export default function ConsolePage() {
   const { account, usdc, configured, hasWallet, wrongChain, connect, connecting, refresh } =
     useWallet();
@@ -59,6 +63,7 @@ export default function ConsolePage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [routeFeed, setRouteFeed] = useState<RouteFeed | null>(null);
+  const [adapter, setAdapter] = useState<ByrealSkillAdapter>(() => new LocalByrealAdapter());
 
   // Ephemeral lifecycle working state (current run).
   const [tree, setTree] = useState<DecisionTree | null>(null);
@@ -220,7 +225,13 @@ export default function ConsolePage() {
     setError(null);
     setBusy("execute");
     try {
-      const result = await executeBranch(adapter, selectedBranch, state!.policy, account);
+      // Run the skills through the real Byreal Agent Skills backend when it is
+      // reachable; otherwise the local adapter. Either way execution is a real
+      // on-chain deposit into the Mantle vault.
+      const market = await fetchByrealMarket();
+      const chosen = selectAdapter(market);
+      setAdapter(chosen);
+      const result = await executeBranch(chosen, selectedBranch, state!.policy, account);
       setExecution(result);
       await refresh();
       scrollToResult();
