@@ -1,0 +1,15 @@
+{
+  "network": "mantleSepolia",
+  "chainId": 5003,
+  "deployer": "0x69eb1bAA26BffCD0fA9089aa2187F6Ca3e2A54f6",
+  "deployedAt": "2026-06-02T17:05:06.213Z",
+  "contracts": {
+    "AxionAgentRegistry": "0x16DBdF87A9A99891eb2B89557527269B81a991D4",
+    "DecisionCommitmentLog": "0x5caeCb1fD4101b49f921E826ea8a7a390D42FA43",
+    "EpochMemoryLog": "0xA336656FA1DAcBB99d3C02a45fF8382a17263FD8",
+    "AxionPolicyVault": "0xC9bF75F4c0950bC5c53538A12Dc172C13a274dBe",
+    "MockUSDC": "0xC47c81B384cb20D23B18dA760C8E5f4587Ab7997",
+    "BalancedVault": "0xb028Db801E0ACe18E16aa39BD30663E020D814ef",
+    "HighApyVault": "0x1a338f7AA1577807E3C7d370230A72bA94c6c561"
+  }
+}
