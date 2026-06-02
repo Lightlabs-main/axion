@@ -92,7 +92,8 @@ export default function AboutPage() {
           contracts: AxionAgentRegistry (identity, trust, memory root, strategy version),
           DecisionCommitmentLog (pre-execution tree commitments), EpochMemoryLog (judged epochs with
           verdict and score) and AxionPolicyVault (on-chain policy). The execution layer is real too:
-          a MockUSDC test token and AxionYieldVault contracts that the agent deposits into.
+          the Axion Test USDC token (aUSDC) and AxionYieldVault contracts that the agent deposits
+          into.
         </p>
         <p>
           Every step — register, commit, deposit, write-epoch, evolve — is a real Mantle transaction

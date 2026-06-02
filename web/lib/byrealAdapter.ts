@@ -5,7 +5,7 @@ import type {
   Route,
   SkillTraceEntry,
 } from "@/types";
-import { getRoute, vaultAddressFor } from "./mockRoutes";
+import { getRoute, vaultAddressFor } from "./routes";
 import { hashAction, hashOutcome } from "./hashing";
 import {
   depositToVault,

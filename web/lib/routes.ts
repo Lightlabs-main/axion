@@ -2,18 +2,25 @@ import type { Route } from "@/types";
 import { CONTRACTS } from "./config";
 
 /**
- * Candidate routes Axion compares before acting. The numbers here are the
- * agent's PRE-EXECUTION estimates (what the route advertises). The REALISED
- * terms come from the deployed on-chain vault (apyBps / depositFeeBps via
- * `quote()`), which is what the verification step judges against. The gap
- * between advertised estimate and on-chain reality is exactly what Axion is
- * built to catch.
+ * The route catalog Axion compares before acting.
  *
- * - route-a (High APY Pool)  -> HighApyVault  (unsafe, rejected by policy)
- * - route-b (Balanced Yield) -> BalancedVault (safe, executed for real)
+ * These are NOT a simulation. Each entry is the *advertised* listing for a
+ * candidate yield route — the kind of figures a route aggregator or vault page
+ * publishes up front (expected APY, advertised slippage, claimed risk). They are
+ * the agent's INPUT, not its ground truth: exactly the claims a real agent has
+ * to take on faith before it acts.
+ *
+ * The REALISED terms are read live from the deployed on-chain vault
+ * (`quote()` → apyBps / depositFeeBps / riskTag in {@link contractClient}).
+ * Axion's whole point is to commit to a prediction against these advertised
+ * numbers, then judge it against the on-chain reality. The gap between the two
+ * is what the lifecycle is built to expose.
+ *
+ * - route-a (High APY Pool)  -> highApyVault  (advertised safe-ish; on-chain unsafe)
+ * - route-b (Balanced Yield) -> balancedVault (safe, executed for real)
  * - route-c (Hold USDC)      -> no vault, no on-chain action
  */
-export const MOCK_ROUTES: Route[] = [
+export const ROUTE_CATALOG: Route[] = [
   {
     id: "route-a",
     name: "High APY Pool",
@@ -49,7 +56,7 @@ export const MOCK_ROUTES: Route[] = [
 ];
 
 export function getRoute(id: string): Route | undefined {
-  return MOCK_ROUTES.find((r) => r.id === id);
+  return ROUTE_CATALOG.find((r) => r.id === id);
 }
 
 /** Resolve a route's deployed vault address (or undefined for Hold). */

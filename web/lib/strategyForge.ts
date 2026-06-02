@@ -6,7 +6,7 @@ import type {
   StrategyState,
   Verdict,
 } from "@/types";
-import { getRoute } from "./mockRoutes";
+import { getRoute } from "./routes";
 
 export const DEFAULT_STRATEGY: StrategyState = {
   riskWeight: 1.0,

@@ -5,7 +5,7 @@ import type {
   Route,
   StrategyState,
 } from "@/types";
-import { MOCK_ROUTES } from "./mockRoutes";
+import { ROUTE_CATALOG } from "./routes";
 import { hashBranch, hashDecisionTree, hashGoal, hashPolicy } from "./hashing";
 
 const RISK_RANK: Record<string, number> = {
@@ -111,9 +111,9 @@ export function generateDecisionTree(
 ): DecisionTree {
   const preferLowRisk = /low[\s-]?risk|safe|avoid|conserv/i.test(goal);
 
-  const routeA = MOCK_ROUTES.find((r) => r.id === "route-a")!;
-  const routeB = MOCK_ROUTES.find((r) => r.id === "route-b")!;
-  const routeC = MOCK_ROUTES.find((r) => r.id === "route-c")!;
+  const routeA = ROUTE_CATALOG.find((r) => r.id === "route-a")!;
+  const routeB = ROUTE_CATALOG.find((r) => r.id === "route-b")!;
+  const routeC = ROUTE_CATALOG.find((r) => r.id === "route-c")!;
 
   const sA = scoreRoute(routeA, policy, strategy, preferLowRisk);
   const sB = scoreRoute(routeB, policy, strategy, preferLowRisk);
