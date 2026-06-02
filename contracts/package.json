@@ -1,0 +1,26 @@
+{
+  "name": "axion-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Axion smart contracts: agent registry, decision commitment log, epoch memory log and policy vault for Mantle.",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
+    "deploy:mantle": "hardhat run scripts/deploy.ts --network mantleSepolia"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@types/chai": "^4.3.16",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.12.7",
+    "dotenv": "^16.4.5",
+    "hardhat": "^2.22.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "solc": "^0.8.24"
+  }
+}
