@@ -23,7 +23,13 @@ export function AgentIdentityCard({ agent }: { agent: AgentIdentity }) {
       <div className="panel p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="label mb-1">ERC-8004-style identity</div>
+            <div className="label mb-1">
+              {agent.registry === "erc8004"
+                ? "ERC-8004 identity (canonical registry)"
+                : agent.registry === "axion"
+                  ? "ERC-8004-aligned identity (Axion registry)"
+                  : "ERC-8004-style identity"}
+            </div>
             <h2 className="font-display text-2xl font-extrabold">{agent.agentName}</h2>
             <div className="mt-1 flex items-center gap-2 text-xs text-[var(--muted)]">
               <span className="mono">{agent.agentId}</span>

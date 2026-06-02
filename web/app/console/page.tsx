@@ -26,9 +26,9 @@ import { LocalByrealAdapter, executeBranch } from "@/lib/byrealAdapter";
 import { judgeAndForge, type JudgeForgeResult } from "@/lib/agentEngine";
 import {
   commitDecisionTreeOnchain,
-  evolveIdentityOnchain,
+  evolveIdentity,
   faucetUsdc,
-  registerAgentOnchain,
+  registerIdentity,
   writeEpochOnchain,
 } from "@/lib/contractClient";
 import { ACTIVE_CHAIN, addressExplorerLink, txExplorerLink } from "@/lib/config";
@@ -119,7 +119,7 @@ export default function ConsolePage() {
     setBusy("init");
     try {
       const metadataURI = "ipfs://axion-agent/erc8004.json";
-      const res = await registerAgentOnchain(account, "Axion", metadataURI);
+      const res = await registerIdentity(account, "Axion", metadataURI);
 
       const newAgent: AgentIdentity = {
         agentId: res.agentId.toString(),
@@ -137,9 +137,14 @@ export default function ConsolePage() {
         createdAt: Date.now(),
         mode: "onchain",
         txHash: res.txHash,
+        registry: res.registry,
       };
       persist(withAgent(state!, newAgent));
-      setNotice(`Agent #${res.agentId} registered on ${ACTIVE_CHAIN.name}.`);
+      const where =
+        res.registry === "erc8004"
+          ? `canonical ERC-8004 registry on ${ACTIVE_CHAIN.name}`
+          : `Axion registry on ${ACTIVE_CHAIN.name}`;
+      setNotice(`Agent #${res.agentId} registered on the ${where}.`);
     } catch (e) {
       setError(humanError(e));
     } finally {
@@ -270,8 +275,9 @@ export default function ConsolePage() {
         BigInt(judged.epoch.strategyVersionAfter)
       );
 
-      // Evolve the on-chain identity (trust, strategy version, memory root, epoch count).
-      await evolveIdentityOnchain(
+      // Evolve the on-chain identity (trust, strategy version, memory root, epoch count)
+      // through the same registry the agent was registered on.
+      await evolveIdentity(
         account,
         BigInt(agent.agentId),
         BigInt(judged.newAgent.trustScore),

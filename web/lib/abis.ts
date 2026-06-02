@@ -237,6 +237,63 @@ export const VAULT_ABI = [
   },
 ] as const;
 
+// Canonical ERC-8004 IdentityRegistry (ERC-721 "AgentIdentity", v2.0.0).
+// Agents are NFTs; evolution data is stored as ERC-8004 metadata entries.
+export const ERC8004_REGISTRY_ABI = [
+  {
+    type: "function",
+    name: "register",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "tokenURI", type: "string" }],
+    outputs: [{ name: "agentId", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "setMetadata",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "agentId", type: "uint256" },
+      { name: "key", type: "string" },
+      { name: "value", type: "bytes" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "getMetadata",
+    stateMutability: "view",
+    inputs: [
+      { name: "agentId", type: "uint256" },
+      { name: "key", type: "string" },
+    ],
+    outputs: [{ name: "", type: "bytes" }],
+  },
+  {
+    type: "function",
+    name: "ownerOf",
+    stateMutability: "view",
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    type: "function",
+    name: "tokenURI",
+    stateMutability: "view",
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    // Standard ERC-721 mint event — tokenId is the minted agentId.
+    type: "event",
+    name: "Transfer",
+    inputs: [
+      { name: "from", type: "address", indexed: true },
+      { name: "to", type: "address", indexed: true },
+      { name: "tokenId", type: "uint256", indexed: true },
+    ],
+  },
+] as const;
+
 // Maps the string verdicts to the on-chain enum index.
 export const VERDICT_ENUM: Record<string, number> = {
   Correct: 0,

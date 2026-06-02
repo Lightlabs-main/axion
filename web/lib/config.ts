@@ -55,6 +55,22 @@ export const CONTRACTS = {
   highApyVault: process.env.NEXT_PUBLIC_HIGH_APY_VAULT_ADDRESS ?? "",
 } as const;
 
+// Canonical ERC-8004 IdentityRegistry ("AgentIdentity" / AGENT, v2.0.0).
+// Deployed by the ERC-8004 standard at the same vanity address per chain.
+// Present on Mantle mainnet; not deployed on Mantle Sepolia at time of writing.
+const ERC8004_REGISTRY: Record<number, string> = {
+  5000: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+};
+
+/** The canonical ERC-8004 registry for the active chain, or "" if none. */
+export const ERC8004_REGISTRY_ADDRESS =
+  process.env.NEXT_PUBLIC_ERC8004_REGISTRY_ADDRESS ?? ERC8004_REGISTRY[CHAIN_ID] ?? "";
+
+/** True when the active chain has a real ERC-8004 registry to register against. */
+export function hasErc8004Registry(): boolean {
+  return /^0x[a-fA-F0-9]{40}$/.test(ERC8004_REGISTRY_ADDRESS);
+}
+
 function isAddress(value: string): boolean {
   return /^0x[a-fA-F0-9]{40}$/.test(value);
 }

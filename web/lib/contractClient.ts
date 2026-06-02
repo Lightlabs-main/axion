@@ -4,6 +4,8 @@ import {
   custom,
   http,
   parseEventLogs,
+  stringToHex,
+  zeroAddress,
   type Address,
   type Hash,
 } from "viem";
@@ -12,6 +14,7 @@ import {
   DECISION_LOG_ABI,
   EPOCH_LOG_ABI,
   ERC20_ABI,
+  ERC8004_REGISTRY_ABI,
   VAULT_ABI,
   VERDICT_ENUM,
 } from "./abis";
@@ -20,9 +23,11 @@ import {
   CHAIN_HEX,
   CHAIN_ID,
   CONTRACTS,
+  ERC8004_REGISTRY_ADDRESS,
   MANTLE_RPC_URL,
   USDC_DECIMALS,
   VIEM_CHAIN,
+  hasErc8004Registry,
   isOnchainConfigured,
 } from "./config";
 import type { Verdict } from "@/types";
@@ -80,37 +85,76 @@ export async function getConnectedAccount(): Promise<Address | null> {
   }
 }
 
-/** Connect the wallet and make sure it is on the configured Mantle network. */
+/** Connect the wallet. Network switching is best-effort — if it fails the UI
+ *  shows a "Switch network" button rather than failing the whole connection. */
 export async function connectWallet(): Promise<Address | null> {
   if (!hasInjectedWallet()) return null;
   const accounts = (await window.ethereum!.request({
     method: "eth_requestAccounts",
   })) as string[];
   const account = (accounts?.[0] as Address) ?? null;
-  if (account) await ensureChain();
+  if (account) {
+    try {
+      await ensureChain();
+    } catch {
+      /* leave the account connected; the UI exposes a Switch network button */
+    }
+  }
   return account;
 }
 
-/** Switch the wallet to the configured chain, adding it if unknown. */
+function errCode(err: unknown): number | undefined {
+  const e = err as { code?: number; data?: { originalError?: { code?: number } } };
+  return e?.code ?? e?.data?.originalError?.code;
+}
+function errMessage(err: unknown): string {
+  return (err as { message?: string })?.message ?? String(err);
+}
+
+/**
+ * Switch the wallet to the configured chain, adding it first if the wallet does
+ * not know it. Handles the several different error shapes wallets return for an
+ * unknown chain, and verifies the switch actually took effect.
+ */
 export async function ensureChain(): Promise<void> {
   if (!hasInjectedWallet()) return;
   const current = (await window.ethereum!.request({ method: "eth_chainId" })) as string;
-  if (current?.toLowerCase() === CHAIN_HEX.toLowerCase()) return;
+  if (current && parseInt(current, 16) === CHAIN_ID) return;
+
   try {
     await window.ethereum!.request({
       method: "wallet_switchEthereumChain",
       params: [{ chainId: CHAIN_HEX }],
     });
-  } catch (err: unknown) {
-    const code = (err as { code?: number })?.code;
-    if (code === 4902) {
-      await window.ethereum!.request({
-        method: "wallet_addEthereumChain",
-        params: [ACTIVE_CHAIN_PARAMS],
-      });
-    } else {
-      throw err;
-    }
+  } catch (err) {
+    const code = errCode(err);
+    const notAdded =
+      code === 4902 ||
+      code === -32603 ||
+      /unrecognized chain|not been added|wallet_addethereumchain|add this network/i.test(
+        errMessage(err)
+      );
+    if (!notAdded) throw err;
+
+    // Add the network, then switch (some wallets auto-select after adding).
+    await window.ethereum!.request({
+      method: "wallet_addEthereumChain",
+      params: [ACTIVE_CHAIN_PARAMS],
+    });
+    const after = (await window.ethereum!.request({ method: "eth_chainId" })) as string;
+    if (after && parseInt(after, 16) === CHAIN_ID) return;
+    await window.ethereum!.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: CHAIN_HEX }],
+    });
+  }
+
+  // Final verification.
+  const final = (await window.ethereum!.request({ method: "eth_chainId" })) as string;
+  if (!final || parseInt(final, 16) !== CHAIN_ID) {
+    throw new Error(
+      `Could not switch to ${ACTIVE_CHAIN_PARAMS.chainName}. Add it manually: RPC ${ACTIVE_CHAIN_PARAMS.rpcUrls[0]}, chain id ${CHAIN_ID}.`
+    );
   }
 }
 
@@ -288,6 +332,98 @@ export async function evolveIdentityOnchain(
   })) as Hash;
   await getPublicClient().waitForTransactionReceipt({ hash: h4 });
   return h1;
+}
+
+// ---------------------------------------------------------------------------
+// Identity dispatcher: use the canonical ERC-8004 registry where it exists
+// (Mantle mainnet), otherwise Axion's own ERC-8004-aligned registry.
+// ---------------------------------------------------------------------------
+
+export type RegistryKind = "erc8004" | "axion";
+
+export function activeRegistryKind(): RegistryKind {
+  return hasErc8004Registry() ? "erc8004" : "axion";
+}
+
+export interface IdentityResult {
+  txHash: string;
+  agentId: bigint;
+  registry: RegistryKind;
+}
+
+/** Register the agent identity, on the canonical ERC-8004 registry if present. */
+export async function registerIdentity(
+  account: Address,
+  name: string,
+  metadataURI: string
+): Promise<IdentityResult> {
+  requireOnchain();
+  await ensureChain();
+
+  if (hasErc8004Registry()) {
+    const wallet = getWalletClient();
+    const hash = (await wallet.writeContract({
+      account,
+      chain: VIEM_CHAIN,
+      address: ERC8004_REGISTRY_ADDRESS as Address,
+      abi: ERC8004_REGISTRY_ABI,
+      functionName: "register",
+      args: [metadataURI],
+    })) as Hash;
+    const receipt = await getPublicClient().waitForTransactionReceipt({ hash });
+    // The mint Transfer (from == 0x0) carries the agentId as tokenId.
+    const mint = parseEventLogs({
+      abi: ERC8004_REGISTRY_ABI,
+      eventName: "Transfer",
+      logs: receipt.logs,
+    }).find((l) => (l.args as { from?: string }).from === zeroAddress);
+    const agentId = (mint?.args as { tokenId?: bigint })?.tokenId ?? 0n;
+    return { txHash: hash, agentId, registry: "erc8004" };
+  }
+
+  const res = await registerAgentOnchain(account, name, metadataURI);
+  return { txHash: res.txHash, agentId: res.agentId, registry: "axion" };
+}
+
+/** Evolve the on-chain identity (trust, strategy version, memory root). */
+export async function evolveIdentity(
+  account: Address,
+  agentId: bigint,
+  newTrustScore: bigint,
+  newStrategyVersion: bigint,
+  newMemoryRoot: `0x${string}`
+): Promise<string> {
+  requireOnchain();
+
+  if (hasErc8004Registry()) {
+    // ERC-8004 stores evolution as agent metadata entries.
+    const wallet = getWalletClient();
+    const pub = getPublicClient();
+    const base = {
+      account,
+      chain: VIEM_CHAIN,
+      address: ERC8004_REGISTRY_ADDRESS as Address,
+      abi: ERC8004_REGISTRY_ABI,
+      functionName: "setMetadata",
+    } as const;
+    const entries: [string, `0x${string}`][] = [
+      ["axion.trustScore", stringToHex(newTrustScore.toString())],
+      ["axion.strategyVersion", stringToHex(newStrategyVersion.toString())],
+      ["axion.memoryRoot", newMemoryRoot],
+    ];
+    let first = "";
+    for (const [key, value] of entries) {
+      const h = (await wallet.writeContract({
+        ...base,
+        args: [agentId, key, value],
+      })) as Hash;
+      await pub.waitForTransactionReceipt({ hash: h });
+      if (!first) first = h;
+    }
+    return first;
+  }
+
+  return evolveIdentityOnchain(account, agentId, newTrustScore, newStrategyVersion, newMemoryRoot);
 }
 
 // ---------------------------------------------------------------------------

@@ -178,6 +178,8 @@ export interface AgentIdentity {
   createdAt: number;
   mode: "local" | "onchain";
   txHash?: string;
+  /** Which on-chain registry the agent identity lives in. */
+  registry?: "erc8004" | "axion";
 }
 
 export type PermissionLevel =

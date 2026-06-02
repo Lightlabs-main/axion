@@ -1,11 +1,22 @@
 "use client";
 
+import { useState } from "react";
 import { useWallet } from "./WalletProvider";
 import { ACTIVE_CHAIN } from "@/lib/config";
 
 export function ConnectButton() {
-  const { account, connecting, hasWallet, configured, wrongChain, connect, switchNetwork, usdc } =
-    useWallet();
+  const {
+    account,
+    connecting,
+    hasWallet,
+    configured,
+    wrongChain,
+    error,
+    connect,
+    switchNetwork,
+    usdc,
+  } = useWallet();
+  const [switching, setSwitching] = useState(false);
 
   if (!configured) {
     return (
@@ -28,17 +39,36 @@ export function ConnectButton() {
 
   if (!account) {
     return (
-      <button onClick={connect} disabled={connecting} className="btn btn-primary">
-        {connecting ? "Connecting…" : "Connect wallet"}
-      </button>
+      <span className="flex flex-col items-end">
+        <button onClick={connect} disabled={connecting} className="btn btn-primary">
+          {connecting ? "Connecting…" : "Connect wallet"}
+        </button>
+        {error && <span className="mt-1 max-w-[220px] text-right text-[10px] text-[var(--rose)]">{error}</span>}
+      </span>
     );
   }
 
   if (wrongChain) {
     return (
-      <button onClick={switchNetwork} className="btn btn-primary">
-        Switch to {ACTIVE_CHAIN.name}
-      </button>
+      <span className="flex flex-col items-end">
+        <button
+          onClick={async () => {
+            setSwitching(true);
+            try {
+              await switchNetwork();
+            } finally {
+              setSwitching(false);
+            }
+          }}
+          disabled={switching}
+          className="btn btn-primary"
+        >
+          {switching ? "Switching…" : `Switch to ${ACTIVE_CHAIN.name}`}
+        </button>
+        {error && (
+          <span className="mt-1 max-w-[260px] text-right text-[10px] text-[var(--rose)]">{error}</span>
+        )}
+      </span>
     );
   }
 
