@@ -107,13 +107,14 @@ export function generateDecisionTree(
   goal: string,
   policy: Policy,
   strategy: StrategyState,
-  strategyVersion: number
+  strategyVersion: number,
+  routes: Route[] = ROUTE_CATALOG
 ): DecisionTree {
   const preferLowRisk = /low[\s-]?risk|safe|avoid|conserv/i.test(goal);
 
-  const routeA = ROUTE_CATALOG.find((r) => r.id === "route-a")!;
-  const routeB = ROUTE_CATALOG.find((r) => r.id === "route-b")!;
-  const routeC = ROUTE_CATALOG.find((r) => r.id === "route-c")!;
+  const routeA = routes.find((r) => r.id === "route-a")!;
+  const routeB = routes.find((r) => r.id === "route-b")!;
+  const routeC = routes.find((r) => r.id === "route-c")!;
 
   const sA = scoreRoute(routeA, policy, strategy, preferLowRisk);
   const sB = scoreRoute(routeB, policy, strategy, preferLowRisk);

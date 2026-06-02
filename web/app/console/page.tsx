@@ -22,6 +22,7 @@ import {
   withStrategy,
 } from "@/lib/storage";
 import { generateDecisionTree } from "@/lib/decisionTree";
+import { fetchRouteCatalog, type RouteFeed } from "@/lib/routeFeed";
 import { LocalByrealAdapter, executeBranch } from "@/lib/byrealAdapter";
 import { judgeAndForge, type JudgeForgeResult } from "@/lib/agentEngine";
 import {
@@ -57,6 +58,7 @@ export default function ConsolePage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [routeFeed, setRouteFeed] = useState<RouteFeed | null>(null);
 
   // Ephemeral lifecycle working state (current run).
   const [tree, setTree] = useState<DecisionTree | null>(null);
@@ -152,19 +154,28 @@ export default function ConsolePage() {
     }
   }
 
-  function handleGenerate() {
+  async function handleGenerate() {
     setError(null);
     setNotice(null);
     if (!agent) return;
-    const g = goal.trim() || DEFAULT_GOAL;
-    const t = generateDecisionTree(g, state!.policy, state!.strategy, agent.strategyVersion);
-    setTree(t);
-    setCommitment(null);
-    setExecution(null);
-    setJudged(null);
-    setPersisted(false);
-    persist(addTree(state!, t));
-    scrollToResult();
+    setBusy("generate");
+    try {
+      // Pull advertised candidate yields from the live feed (DefiLlama Mantle
+      // pools); falls back to the built-in catalog if the feed is unreachable.
+      const feed = await fetchRouteCatalog();
+      setRouteFeed(feed);
+      const g = goal.trim() || DEFAULT_GOAL;
+      const t = generateDecisionTree(g, state!.policy, state!.strategy, agent.strategyVersion, feed.routes);
+      setTree(t);
+      setCommitment(null);
+      setExecution(null);
+      setJudged(null);
+      setPersisted(false);
+      persist(addTree(state!, t));
+      scrollToResult();
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function handleCommit() {
@@ -430,8 +441,8 @@ export default function ConsolePage() {
                 placeholder="Describe the goal for Axion…"
               />
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button onClick={handleGenerate} className="btn btn-primary">
-                  Generate decision tree
+                <button onClick={handleGenerate} disabled={busy === "generate"} className="btn btn-primary">
+                  {busy === "generate" ? "Reading live yields…" : "Generate decision tree"}
                 </button>
                 {tree && (
                   <button onClick={startNewRun} className="btn btn-ghost text-xs">
@@ -455,6 +466,14 @@ export default function ConsolePage() {
                     )}
                   </SectionTitle>
                   <DecisionTreeView tree={tree} />
+                  {routeFeed && (
+                    <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--muted)]">
+                      <Badge tone={routeFeed.source === "defillama" ? "teal" : "violet"}>
+                        {routeFeed.source === "defillama" ? "Live feed" : "Built-in"}
+                      </Badge>
+                      <span>{routeFeed.detail}</span>
+                    </div>
+                  )}
                   {commitment?.txHash && (
                     <a
                       href={txExplorerLink(commitment.txHash)}
