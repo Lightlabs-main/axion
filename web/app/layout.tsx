@@ -5,9 +5,9 @@ import { Footer } from "@/components/Footer";
 import { WalletProvider } from "@/components/WalletProvider";
 
 export const metadata: Metadata = {
-  title: "Axion — The wallet that proves how it thinks",
+  title: "Axion - AI financial companion on Mantle",
   description:
-    "Axion is a self-evolving agentic wallet on Mantle that commits its decision paths before acting, verifies outcomes, and turns every result into on-chain memory and strategy evolution.",
+    "Axion is a personal AI financial companion that turns goals into transparent on-chain strategies, proves its work, and evolves after every judged epoch.",
 };
 
 export default function RootLayout({

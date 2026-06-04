@@ -48,9 +48,16 @@ import { PolicyCard } from "@/components/PolicyCard";
 import { ExecutionView } from "@/components/ExecutionView";
 import { EpochView } from "@/components/EpochView";
 import { SectionTitle, Badge } from "@/components/ui";
+import { AxionCompanion, ShareableEpochCard } from "@/components/AxionCompanion";
 
 const DEFAULT_GOAL =
   "Use 100 test USDC to find a low-risk yield opportunity on Mantle. Avoid unsafe approvals and high slippage.";
+
+const SUGGESTED_GOALS = [
+  "Help me grow a house fund over 3 years with moderate risk.",
+  "Earn steady RWA-style yield while keeping emergency liquidity.",
+  "Protect my wallet from unsafe approvals and explain every move.",
+];
 
 export default function ConsolePage() {
   const { account, usdc, configured, hasWallet, wrongChain, connect, connecting, refresh } =
@@ -104,6 +111,9 @@ export default function ConsolePage() {
 
   const agent = state.agent;
   const selectedBranch = tree?.branches.find((b) => b.id === tree.selectedBranchId);
+  const latestEpoch = state.epochs[0] ?? null;
+  const companionMood =
+    persisted ? "evolved" : execution ? "executing" : commitment ? "committed" : tree ? "thinking" : "idle";
 
   async function handleFaucet() {
     if (!account) return;
@@ -372,12 +382,13 @@ export default function ConsolePage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="label mb-1">Agent console · {ACTIVE_CHAIN.name}</div>
+          <div className="label mb-1">Consumer companion · {ACTIVE_CHAIN.name}</div>
           <h1 className="font-display text-3xl font-extrabold">
-            Run the <span className="gradient-text">lifecycle</span>
+            Tell Axion what you want. It will prove how it thinks.
           </h1>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Most AI wallets act first and explain later. Axion commits before it acts — on-chain.
+            The friendly chat surface feeds the same on-chain lifecycle: predict, commit, execute,
+            judge, forge and evolve.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -443,14 +454,39 @@ export default function ConsolePage() {
         <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
           <div className="space-y-6">
             <div className="panel p-5">
-              <SectionTitle eyebrow="Step 1 · Predict" title="Goal" />
+              <SectionTitle eyebrow="Step 1 · Predict" title="Chat with Axion" />
+              <div className="mb-4 rounded-2xl border border-[var(--border)] bg-black/20 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[rgba(45,212,191,0.10)] font-display font-bold text-[var(--teal-glow)]">
+                    A
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold">What should we optimize for?</div>
+                    <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
+                      Write the goal like you would to a financial partner. Axion will translate it
+                      into branches, safety rules and a committed proof.
+                    </p>
+                  </div>
+                </div>
+              </div>
               <textarea
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
                 rows={3}
                 className="mono w-full resize-none rounded-xl border border-[var(--border)] bg-black/30 p-3 text-sm text-[var(--text)] outline-none focus:border-[var(--border-strong)]"
-                placeholder="Describe the goal for Axion…"
+                placeholder="Example: Help me grow a house fund with moderate risk while keeping emergency liquidity."
               />
+              <div className="mt-3 flex flex-wrap gap-2">
+                {SUGGESTED_GOALS.map((sample) => (
+                  <button
+                    key={sample}
+                    onClick={() => setGoal(sample)}
+                    className="rounded-full border border-[var(--border)] bg-black/20 px-3 py-1.5 text-left text-xs text-[var(--muted)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text)]"
+                  >
+                    {sample}
+                  </button>
+                ))}
+              </div>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button onClick={handleGenerate} disabled={busy === "generate"} className="btn btn-primary">
                   {busy === "generate" ? "Reading live yields…" : "Generate decision tree"}
@@ -590,6 +626,9 @@ export default function ConsolePage() {
                           Run another goal
                         </button>
                       </div>
+                      <div className="mt-5">
+                        <ShareableEpochCard epoch={judged.epoch} />
+                      </div>
                       <p className="mt-4 text-xs text-[var(--muted)]">
                         Every outcome forges the next strategy. The trust score, strategy version and
                         memory root above were all updated on-chain.
@@ -607,6 +646,13 @@ export default function ConsolePage() {
           </div>
 
           <div className="space-y-6">
+            <AxionCompanion
+              agent={agent}
+              latestEpoch={latestEpoch}
+              mood={companionMood}
+              compact
+            />
+
             <PolicyCard
               policy={state.policy}
               trustScore={agent.trustScore}

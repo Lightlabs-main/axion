@@ -143,3 +143,125 @@ h1, h2, h3, h4 {
 .glow-dot {
   box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.18);
 }
+
+.companion-shell {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(94, 234, 212, 0.22);
+  border-radius: 24px;
+  background:
+    linear-gradient(150deg, rgba(14, 19, 28, 0.94), rgba(8, 10, 18, 0.88)),
+    radial-gradient(circle at 50% 0%, rgba(94, 234, 212, 0.18), transparent 46%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 36px 90px -48px rgba(45, 212, 191, 0.5);
+}
+
+.companion-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(94, 234, 212, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(167, 139, 250, 0.06) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: radial-gradient(circle at 50% 28%, black, transparent 72%);
+}
+
+.companion-shell > * {
+  position: relative;
+  z-index: 1;
+}
+
+.companion-orb {
+  --evolution: 1;
+  position: relative;
+  display: grid;
+  height: 180px;
+  width: 180px;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.34), transparent 12%),
+    radial-gradient(circle at 48% 52%, rgba(94, 234, 212, 0.72), transparent 28%),
+    radial-gradient(circle at 60% 42%, rgba(167, 139, 250, 0.44), transparent 44%),
+    radial-gradient(circle at 50% 50%, rgba(45, 212, 191, 0.14), transparent 68%);
+  filter: drop-shadow(0 0 24px rgba(94, 234, 212, 0.34));
+}
+
+.companion-core {
+  display: grid;
+  height: 76px;
+  width: 76px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 50%;
+  background: rgba(5, 7, 11, 0.72);
+  box-shadow:
+    0 0 32px rgba(94, 234, 212, 0.26),
+    0 0 calc(var(--evolution) * 7px) rgba(167, 139, 250, 0.2) inset;
+}
+
+.companion-core span {
+  font-family: "Sora", ui-sans-serif, system-ui, sans-serif;
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.companion-ring {
+  position: absolute;
+  inset: calc(22px - var(--evolution) * 1px);
+  border: 1px solid rgba(94, 234, 212, 0.22);
+  border-radius: 50%;
+}
+
+.companion-ring-a {
+  animation: companion-spin 10s linear infinite;
+  border-left-color: rgba(167, 139, 250, 0.74);
+  border-top-color: rgba(94, 234, 212, 0.72);
+}
+
+.companion-ring-b {
+  inset: calc(42px - var(--evolution) * 1px);
+  animation: companion-spin 7s linear infinite reverse;
+  border-right-color: rgba(255, 255, 255, 0.5);
+  border-bottom-color: rgba(94, 234, 212, 0.66);
+}
+
+.mood-thinking,
+.mood-executing {
+  animation: companion-pulse 1.8s ease-in-out infinite;
+}
+
+.mood-evolved {
+  filter: drop-shadow(0 0 34px rgba(52, 211, 153, 0.46));
+}
+
+.share-card {
+  position: relative;
+  border: 1px solid rgba(94, 234, 212, 0.28);
+  border-radius: 24px;
+  background:
+    linear-gradient(145deg, rgba(12, 18, 27, 0.96), rgba(7, 9, 16, 0.92)),
+    radial-gradient(circle at 12% 0%, rgba(94, 234, 212, 0.22), transparent 36%),
+    radial-gradient(circle at 95% 16%, rgba(167, 139, 250, 0.2), transparent 38%);
+  box-shadow: 0 32px 90px -54px rgba(94, 234, 212, 0.5);
+}
+
+@keyframes companion-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes companion-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.035);
+  }
+}

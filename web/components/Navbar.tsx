@@ -7,7 +7,7 @@ import { ConnectButton } from "./ConnectButton";
 
 const LINKS = [
   { href: "/", label: "Home" },
-  { href: "/console", label: "Console" },
+  { href: "/console", label: "App" },
   { href: "/identity", label: "Identity" },
   { href: "/about", label: "How it works" },
 ];
