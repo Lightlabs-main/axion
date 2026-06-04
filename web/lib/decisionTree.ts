@@ -96,6 +96,103 @@ function riskFromRoute(route: Route): Branch["riskLevel"] {
   return route.risk;
 }
 
+function isProtectionOnlyGoal(goal: string): boolean {
+  const asksForProtection = /protect|approval|unsafe|guard|audit|revoke|permission|wallet/i.test(goal);
+  const asksForYield = /yield|apy|earn|grow|rwa|house|save|fund|deposit|allocate/i.test(goal);
+  return asksForProtection && !asksForYield;
+}
+
+function buildProtectionTree(
+  goal: string,
+  policy: Policy,
+  strategyVersion: number
+): DecisionTree {
+  const selectedBranchId: Branch["id"] = policy.isPaused ? "D" : "B";
+  const rawBranches: Omit<Branch, "branchHash">[] = [
+    {
+      id: "A",
+      name: "Allow Risky Approval",
+      action: "Permit a broad approval and continue toward execution",
+      expectedOutcome: "Rejected because the active goal asks Axion to protect the wallet",
+      riskLevel: "high",
+      confidence: 18,
+      reason:
+        "This branch represents the dangerous path Axion should avoid: broad approvals, unclear spend scope and weak user protection.",
+      fallbackTrigger: "Blocked when the goal or policy forbids unsafe approvals.",
+      status: "unsafe",
+      score: -2,
+    },
+    {
+      id: "B",
+      name: "Protection Mode",
+      action: "Keep funds in the wallet, block unsafe approvals and require proof before any future movement",
+      expectedOutcome: "No funds moved; unsafe approvals remain blocked; policy stays conservative",
+      riskLevel: "lowest",
+      confidence: 90,
+      reason:
+        "The user asked for wallet protection, not yield. Axion chooses the safest branch and preserves capital while recording the reasoning path.",
+      fallbackTrigger: "Escalate to Reject Execution if the policy is paused or any approval request becomes ambiguous.",
+      status: "candidate",
+      score: 3,
+    },
+    {
+      id: "C",
+      name: "Observe Only",
+      action: "Do not execute; only monitor wallet policy and explain the current safety posture",
+      expectedOutcome: "Read-only review with no approvals and no asset movement",
+      riskLevel: "lowest",
+      confidence: 76,
+      reason:
+        "A passive fallback that still helps the user understand risk without changing wallet state.",
+      fallbackTrigger: "Used when the user wants explanation without any execution.",
+      status: "fallback",
+      score: 2,
+    },
+    {
+      id: "D",
+      name: "Reject Execution",
+      action: "Refuse to act and return funds untouched",
+      expectedOutcome: "No action taken; policy mismatch reported",
+      riskLevel: "lowest",
+      confidence: 88,
+      reason:
+        "Selected when the active wallet policy is paused or the safest action is to refuse execution entirely.",
+      fallbackTrigger: "Activated on suspicious contract, paused policy or full safety failure.",
+      status: "fallback",
+      score: 1,
+    },
+  ];
+
+  const branches: Branch[] = rawBranches.map((b) => {
+    const status: Branch["status"] =
+      b.id === selectedBranchId
+        ? "selected"
+        : b.id === "A"
+          ? "unsafe"
+          : b.status;
+    const withStatus = { ...b, status };
+    return { ...withStatus, branchHash: hashBranch(withStatus) };
+  });
+
+  const selectedBranch = branches.find((b) => b.id === selectedBranchId)!;
+  const partial = {
+    goal,
+    branches,
+    selectedBranchId,
+    strategyVersion,
+  };
+
+  return {
+    ...partial,
+    policySnapshot: policy,
+    goalHash: hashGoal(goal),
+    treeHash: hashDecisionTree(partial),
+    selectedBranchHash: selectedBranch.branchHash,
+    policyHash: hashPolicy(policy),
+    createdAt: Date.now(),
+  };
+}
+
 /**
  * Generate the full A/B/C/D decision tree for a goal. Deterministic.
  *  - A = high-yield route (expected to be rejected due to unsafe approval/slippage)
@@ -110,6 +207,10 @@ export function generateDecisionTree(
   strategyVersion: number,
   routes: Route[] = ROUTE_CATALOG
 ): DecisionTree {
+  if (isProtectionOnlyGoal(goal)) {
+    return buildProtectionTree(goal, policy, strategyVersion);
+  }
+
   const preferLowRisk = /low[\s-]?risk|safe|avoid|conserv/i.test(goal);
 
   const routeA = routes.find((r) => r.id === "route-a")!;

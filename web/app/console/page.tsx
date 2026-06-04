@@ -489,7 +489,7 @@ export default function ConsolePage() {
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button onClick={handleGenerate} disabled={busy === "generate"} className="btn btn-primary">
-                  {busy === "generate" ? "Reading live yields…" : "Generate decision tree"}
+                  {busy === "generate" ? "Building branches..." : "Generate decision tree"}
                 </button>
                 {tree && (
                   <button onClick={startNewRun} className="btn btn-ghost text-xs">
