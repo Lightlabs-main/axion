@@ -56,6 +56,7 @@ const DEFAULT_GOAL =
 const SUGGESTED_GOALS = [
   "Help me grow a house fund over 3 years with moderate risk.",
   "Earn steady RWA-style yield while keeping emergency liquidity.",
+  "Rebalance if market risk improves, but keep my downside protected.",
   "Protect my wallet from unsafe approvals and explain every move.",
 ];
 

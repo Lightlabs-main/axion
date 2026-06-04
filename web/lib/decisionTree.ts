@@ -24,6 +24,21 @@ interface ScoredRoute {
   rejectReasons: string[];
 }
 
+type GoalIntent = "protection" | "trading" | "rwa" | "savings" | "liquidity" | "generic";
+
+interface GoalProfile {
+  intent: GoalIntent;
+  branchAName: string;
+  branchBName: string;
+  branchCName: string;
+  branchAReason: string;
+  branchBReason: string;
+  branchCReason: string;
+  branchAOutcome: (route: Route) => string;
+  branchBOutcome: (route: Route) => string;
+  branchCFallback: string;
+}
+
 /**
  * Score a route against the active policy + strategy weights. Higher is better.
  * Hard violations (unsafe approval when not allowed, slippage over policy) mark
@@ -100,6 +115,122 @@ function isProtectionOnlyGoal(goal: string): boolean {
   const asksForProtection = /protect|approval|unsafe|guard|audit|revoke|permission|wallet/i.test(goal);
   const asksForYield = /yield|apy|earn|grow|rwa|house|save|fund|deposit|allocate/i.test(goal);
   return asksForProtection && !asksForYield;
+}
+
+function classifyGoal(goal: string): GoalIntent {
+  if (/trade|trading|swap|rebalance|hedge|momentum|alpha|market|position/i.test(goal)) {
+    return "trading";
+  }
+  if (/rwa|real[\s-]?world|usdy|treasury|stable yield|income/i.test(goal)) {
+    return "rwa";
+  }
+  if (/house|save|saving|goal|college|rent|emergency|retire|future/i.test(goal)) {
+    return "savings";
+  }
+  if (/liquid|liquidity|cash|withdraw|accessible|emergency/i.test(goal)) {
+    return "liquidity";
+  }
+  if (/protect|approval|unsafe|guard|audit|revoke|permission|wallet/i.test(goal)) {
+    return "protection";
+  }
+  return "generic";
+}
+
+function profileForGoal(goal: string): GoalProfile {
+  const intent = classifyGoal(goal);
+  const profiles: Record<GoalIntent, GoalProfile> = {
+    protection: {
+      intent,
+      branchAName: "Risky Permission Path",
+      branchBName: "Guarded Wallet Mode",
+      branchCName: "Observe Only",
+      branchAReason:
+        "Fast execution would require broader permissions than this goal should allow. Axion treats that as a danger path.",
+      branchBReason:
+        "Best fit for a protection goal: preserve capital, block unsafe approvals and only allow scoped, explainable actions.",
+      branchCReason:
+        "Read-only fallback for users who want visibility without changing wallet state.",
+      branchAOutcome: (route) => `Potential ${route.expectedYieldPct}% APY, but approval risk is not acceptable for this goal`,
+      branchBOutcome: (route) => `Guarded action only if safety checks pass; otherwise no funds move (${route.expectedYieldPct}% target route available)`,
+      branchCFallback: "Used when explanation is useful but execution should stay off.",
+    },
+    trading: {
+      intent,
+      branchAName: "Aggressive Market Move",
+      branchBName: "Guarded Rebalance",
+      branchCName: "Hold & Watch",
+      branchAReason:
+        "Highest upside path, but Axion flags the wider approval surface, weaker liquidity and larger execution drift.",
+      branchBReason:
+        "Translates the trading goal into a constrained on-chain action with safer approvals, lower slippage and better route confidence.",
+      branchCReason:
+        "Capital-preserving fallback when the market signal is not strong enough to justify action.",
+      branchAOutcome: (route) => `~${route.expectedYieldPct}% opportunity profile with materially higher execution risk`,
+      branchBOutcome: (route) => `Guarded rebalance targeting ~${route.expectedYieldPct}% with safe approvals and low slippage`,
+      branchCFallback: "Used when volatility or policy constraints make action unattractive.",
+    },
+    rwa: {
+      intent,
+      branchAName: "Max RWA Yield",
+      branchBName: "Balanced RWA Allocation",
+      branchCName: "Stable Reserve",
+      branchAReason:
+        "Higher advertised yield, but the route asks for more trust than Axion should grant without a stronger safety record.",
+      branchBReason:
+        "Best fit for RWA-style goals: steady yield, better liquidity, safer approvals and high protocol confidence.",
+      branchCReason:
+        "Keeps assets liquid when available RWA routes do not clear the user's safety constraints.",
+      branchAOutcome: (route) => `~${route.expectedYieldPct}% RWA-style APY, with higher liquidity and approval risk`,
+      branchBOutcome: (route) => `~${route.expectedYieldPct}% steady yield with safe approvals and low slippage`,
+      branchCFallback: "Used when yield routes stop matching the policy.",
+    },
+    savings: {
+      intent,
+      branchAName: "Max Growth Path",
+      branchBName: "Goal-Safe Growth",
+      branchCName: "Keep Liquid",
+      branchAReason:
+        "The goal has a real-life time horizon, so Axion rejects growth that depends on unsafe approvals or fragile liquidity.",
+      branchBReason:
+        "Balances growth with capital protection, matching a consumer savings goal better than raw APY chasing.",
+      branchCReason:
+        "Keeps funds accessible if available routes do not justify the risk.",
+      branchAOutcome: (route) => `~${route.expectedYieldPct}% growth target, but with higher risk than the goal allows`,
+      branchBOutcome: (route) => `~${route.expectedYieldPct}% goal-safe yield with guarded execution`,
+      branchCFallback: "Used when preserving the goal principal matters more than earning yield.",
+    },
+    liquidity: {
+      intent,
+      branchAName: "Yield With Lockup Risk",
+      branchBName: "Liquid Yield Route",
+      branchCName: "Full Liquidity",
+      branchAReason:
+        "This path may earn more, but it weakens the user's liquidity requirement and adds avoidable execution risk.",
+      branchBReason:
+        "Prioritizes access to funds while still allowing a conservative yield action when policy permits.",
+      branchCReason:
+        "Most liquid fallback: no approvals, no deposits, no waiting.",
+      branchAOutcome: (route) => `~${route.expectedYieldPct}% APY, but liquidity and approval tradeoffs are material`,
+      branchBOutcome: (route) => `~${route.expectedYieldPct}% with safer liquidity and approval posture`,
+      branchCFallback: "Used when immediate access matters more than yield.",
+    },
+    generic: {
+      intent,
+      branchAName: "Chase High Yield",
+      branchBName: "Balanced Safe Yield",
+      branchCName: "Hold USDC",
+      branchAReason:
+        "Best raw APY but low liquidity and an unsafe approval pattern. Higher reward, materially higher risk.",
+      branchBReason:
+        "Lower yield than route A but safe approvals, high protocol trust and slippage well within policy. Best risk-adjusted outcome.",
+      branchCReason:
+        "Capital-preserving fallback. Chosen when no yield route clears safety checks.",
+      branchAOutcome: (route) => `~${route.expectedYieldPct}% APY (higher yield, lower liquidity)`,
+      branchBOutcome: (route) => `~${route.expectedYieldPct}% APY with safe approvals and low slippage`,
+      branchCFallback: "Used as fallback when all yield routes are rejected.",
+    },
+  };
+  return profiles[intent];
 }
 
 function buildProtectionTree(
@@ -211,6 +342,7 @@ export function generateDecisionTree(
     return buildProtectionTree(goal, policy, strategyVersion);
   }
 
+  const profile = profileForGoal(goal);
   const preferLowRisk = /low[\s-]?risk|safe|avoid|conserv/i.test(goal);
 
   const routeA = routes.find((r) => r.id === "route-a")!;
@@ -233,13 +365,12 @@ export function generateDecisionTree(
   const rawBranches: Omit<Branch, "branchHash">[] = [
     {
       id: "A",
-      name: "Chase High Yield",
+      name: profile.branchAName,
       action: `Deposit ${policy.maxSpend} ${policy.asset} into ${routeA.name}`,
-      expectedOutcome: `~${routeA.expectedYieldPct}% APY (higher yield, lower liquidity)`,
+      expectedOutcome: profile.branchAOutcome(routeA),
       riskLevel: riskFromRoute(routeA),
       confidence: 38,
-      reason:
-        "Best raw APY but low liquidity and an unsafe approval pattern. Higher reward, materially higher risk.",
+      reason: profile.branchAReason,
       fallbackTrigger:
         "Reject if approval is unsafe, liquidity is low, or slippage exceeds policy.",
       status: "candidate",
@@ -248,13 +379,12 @@ export function generateDecisionTree(
     },
     {
       id: "B",
-      name: "Balanced Safe Yield",
+      name: profile.branchBName,
       action: `Deposit ${policy.maxSpend} ${policy.asset} into ${routeB.name}`,
-      expectedOutcome: `~${routeB.expectedYieldPct}% APY with safe approvals and low slippage`,
+      expectedOutcome: profile.branchBOutcome(routeB),
       riskLevel: riskFromRoute(routeB),
       confidence: 82,
-      reason:
-        "Lower yield than route A but safe approvals, high protocol trust and slippage well within policy. Best risk-adjusted outcome.",
+      reason: profile.branchBReason,
       fallbackTrigger: "Rebalance to Hold (C) if the route becomes unstable.",
       status: "candidate",
       score: sB.score,
@@ -262,14 +392,13 @@ export function generateDecisionTree(
     },
     {
       id: "C",
-      name: "Hold USDC",
+      name: profile.branchCName,
       action: `Keep ${policy.maxSpend} ${policy.asset} in the wallet`,
       expectedOutcome: "0% yield, full liquidity, zero approval risk",
       riskLevel: riskFromRoute(routeC),
       confidence: 60,
-      reason:
-        "Capital-preserving fallback. Chosen when no yield route clears safety checks.",
-      fallbackTrigger: "Used as fallback when all yield routes are rejected.",
+      reason: profile.branchCReason,
+      fallbackTrigger: profile.branchCFallback,
       status: "candidate",
       score: sC.score,
       routeId: routeC.id,
